@@ -1,13 +1,10 @@
 <!-- A component with browser behaviour. The <x-counter> element stays in
      the output, so the script can define it as a custom element. The script
-     is included only on pages that use the component. -->
+     is included only on pages that use the component. The button has no
+     style of its own: site.css already says what a <button> looks like. -->
 <template>
   <button type="button">{{ label }}: <span>0</span></button>
 </template>
-
-<style>
-  button { padding: .5rem 1rem; font: inherit; cursor: pointer; }
-</style>
 
 <script>
   customElements.define('x-counter', class extends HTMLElement {

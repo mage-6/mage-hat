@@ -10,14 +10,20 @@ use std::path::Path;
 const SCAFFOLD: &[(&str, &str)] = &[
     ("site.toml", include_str!("../scaffold/site.toml")),
     (".gitignore", include_str!("../scaffold/_gitignore")),
+    ("src/assets/favicon.svg", include_str!("../scaffold/src/assets/favicon.svg")),
     ("src/assets/site.css", include_str!("../scaffold/src/assets/site.css")),
     ("src/components/base.html", include_str!("../scaffold/src/components/base.html")),
     ("src/components/card.html", include_str!("../scaffold/src/components/card.html")),
     ("src/components/counter.html", include_str!("../scaffold/src/components/counter.html")),
+    // The sample site uses a ready-made component, taken from the library
+    // itself so the two cannot drift.
+    ("src/components/faq.html", include_str!("../library/faq.html")),
     ("src/components/nav.html", include_str!("../scaffold/src/components/nav.html")),
     ("src/content/blog/hello-world.md", include_str!("../scaffold/src/content/blog/hello-world.md")),
     ("src/content/blog/second-post.md", include_str!("../scaffold/src/content/blog/second-post.md")),
+    ("src/data/faq.json", include_str!("../scaffold/src/data/faq.json")),
     ("src/i18n/en.json", include_str!("../scaffold/src/i18n/en.json")),
+    ("src/icons/lucide/chevron-down.svg", include_str!("../scaffold/src/icons/lucide/chevron-down.svg")),
     ("src/icons/lucide/crown.svg", include_str!("../scaffold/src/icons/lucide/crown.svg")),
     ("src/pages/404.html", include_str!("../scaffold/src/pages/404.html")),
     ("src/pages/about.html", include_str!("../scaffold/src/pages/about.html")),

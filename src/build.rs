@@ -15,7 +15,7 @@ use crate::seo::{alternate_links, inject_head, robots_txt, rss_xml, sitemap_xml,
 use crate::values::{to_text, Ctx, Map, Value};
 use indexmap::{IndexMap, IndexSet};
 use std::collections::{BTreeMap, HashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const ASSET_DIR: &str = "_mh";
 
@@ -216,7 +216,7 @@ struct Builder<'r> {
 
 impl<'r> Builder<'r> {
     fn run(result: &'r mut BuildResult) {
-        let icons = crate::icons::Icons::new(&result.cfg.root);
+        let icons = crate::icons::Icons::new(&result.cfg.root, &result.cfg.icons);
         let fonts = crate::fonts::Fonts::new(&result.cfg.root);
         let mut b = Builder {
             r: result,
@@ -562,12 +562,20 @@ impl<'r> Builder<'r> {
         env.icons = Some(&self.icons);
         let html = render_nodes(&tree[start..], &ctx, &mut env, &file)?;
         let html = html.trim_start().to_string();
-        let lines = self.head_lines(&env.used, &inst.url, &inst.translations, &html);
+        let robots = page.get("robots").map(to_text).filter(|s| !s.trim().is_empty());
+        let lines = self.head_lines(&env.used, &inst.url, &inst.translations, &html, robots.as_deref());
         Ok((inject_head(&html, &lines), env.used.iter().cloned().collect()))
     }
 
-    fn head_lines(&self, used: &IndexSet<String>, url: &str, translations: &[Translation], html: &str) -> Vec<String> {
+    fn head_lines(&self, used: &IndexSet<String>, url: &str, translations: &[Translation], html: &str, robots: Option<&str>) -> Vec<String> {
         let mut lines = Vec::new();
+        // Page metadata is stripped from the body; a robots directive written
+        // there (noindex) still has to reach the head.
+        if let Some(robots) = robots {
+            if !html.contains("name=\"robots\"") {
+                lines.push(format!("<meta name=\"robots\" content=\"{}\">", crate::values::escape_attr_str(robots)));
+            }
+        }
         for tag in used {
             let comp = &self.r.components[tag];
             if !comp.style.is_empty() {
@@ -621,22 +629,33 @@ impl<'r> Builder<'r> {
     /// Copy src/assets to the site root. Returns the output keys added.
     fn copy_assets(&mut self) -> Vec<String> {
         let mut keys = Vec::new();
-        let base = self.r.cfg.src().join("assets");
-        if !base.is_dir() {
-            return keys;
+        // src/assets at the root, then every [assets] folder under its name.
+        let mut folders: Vec<(String, String, PathBuf)> = vec![(String::new(), "src/assets".into(), self.r.cfg.src().join("assets"))];
+        for (name, dir) in &self.r.cfg.assets {
+            folders.push((format!("{name}/"), dir.clone(), self.r.cfg.root.join(dir)));
         }
-        for (path, rel) in walk_files(&base, &base) {
-            if self.r.outputs.contains_key(&rel) {
-                self.r.errors.push(MageError::in_file(format!("asset collides with a generated page: /{rel}"), &format!("src/assets/{rel}"))
-                    .fix("rename the asset or the page"));
+        for (prefix, source, base) in folders {
+            if !base.is_dir() {
+                if !prefix.is_empty() {
+                    self.r.errors.push(MageError::in_file(format!("[assets] folder for {} does not exist: {source}", prefix.trim_end_matches('/')), "site.toml")
+                        .fix("the path is relative to the folder holding site.toml; create it or fix the path"));
+                }
                 continue;
             }
-            match std::fs::read(&path) {
-                Ok(bytes) => {
-                    self.r.outputs.insert(rel.clone(), bytes);
-                    keys.push(rel);
+            for (path, rel) in walk_files(&base, &base) {
+                let rel = format!("{prefix}{rel}");
+                if self.r.outputs.contains_key(&rel) {
+                    self.r.errors.push(MageError::in_file(format!("asset collides with a generated page: /{rel}"), &format!("{source}/{rel}"))
+                        .fix("rename the asset or the page"));
+                    continue;
                 }
-                Err(e) => self.r.errors.push(MageError::in_file(format!("cannot read asset: {e}"), &format!("src/assets/{rel}"))),
+                match std::fs::read(&path) {
+                    Ok(bytes) => {
+                        self.r.outputs.insert(rel.clone(), bytes);
+                        keys.push(rel);
+                    }
+                    Err(e) => self.r.errors.push(MageError::in_file(format!("cannot read asset: {e}"), &format!("{source}/{rel}"))),
+                }
             }
         }
         keys
@@ -687,11 +706,13 @@ impl<'r> Builder<'r> {
             self.r.warn("sitemap.xml and canonical links skipped", Some("site.toml"), Some("set url = \"https://your-domain\" in site.toml"));
             return;
         }
+        // A page that asks not to be indexed is left out of the sitemap too.
+        let noindex = |out: &str| crate::check::is_noindex(&String::from_utf8_lossy(&self.r.outputs[out]));
         let entries: Vec<SitemapEntry> = self
             .r
             .pages
             .iter()
-            .filter(|p| !p.url.ends_with("404.html"))
+            .filter(|p| !p.url.ends_with("404.html") && !noindex(&p.out))
             .map(|p| SitemapEntry { url: p.url.clone(), lastmod: p.lastmod.clone(), translations: p.translations.clone() })
             .collect();
         self.r.outputs.insert("sitemap.xml".into(), sitemap_xml(&entries, &self.r.cfg.url).into_bytes());

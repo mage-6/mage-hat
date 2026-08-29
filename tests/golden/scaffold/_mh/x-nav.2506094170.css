@@ -1,0 +1,1 @@
+x-nav{display:contents}@scope (x-nav) to (:scope :is(x-base,x-card,x-counter,x-faq,x-nav)>*){nav{display:flex;gap:var(--space-m);padding:var(--space-m);border-bottom:1px solid var(--rule)}.brand{font-weight:bold;margin-right:auto}}

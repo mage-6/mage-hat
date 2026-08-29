@@ -1,5 +1,5 @@
 <title>About</title>
-<meta name="description" content="Who is behind this site.">
+<meta name="description" content="Who is behind this site, and the questions people ask.">
 
 <x-base>
   <h1>About</h1>
@@ -10,4 +10,9 @@
        size, adds lazy loading and a WebP version, and with a width it also
        generates resized variants for normal and high-density screens. -->
   <img src="/photos/hat.jpg" alt="A hat, drawn as a gradient and a circle" width="600">
+
+  <h2 id="questions">Questions</h2>
+  <!-- A ready-made component (magehat add faq), fed from src/data/faq.json.
+       schema="faq" adds FAQPage structured data from the same questions. -->
+  <x-faq items="{{ data.faq }}" group="about" schema="faq"></x-faq>
 </x-base>

@@ -1,0 +1,1 @@
+x-card{display:contents}@scope (x-card) to (:scope :is(x-base,x-card,x-counter,x-faq,x-nav)>*){.card{border:1px solid var(--rule);border-radius:var(--radius);padding:var(--space-m);margin-bottom:var(--space-m)}.card h2{margin:0 0 var(--space-xs);font-size:var(--text-l)}.date{color:var(--muted);font-size:var(--text-s);margin:0 0 var(--space-s)}}

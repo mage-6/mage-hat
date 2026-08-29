@@ -82,10 +82,14 @@ New-Item -ItemType Directory -Path $stage -Force | Out-Null
 Copy-Item $exe (Join-Path $stage $exeName)
 if ($os -ne 'windows' -and $hostOs -ne 'windows') { & chmod +x (Join-Path $stage $exeName) }
 
-$manual = (Get-Content (Join-Path $repo 'MANUAL.md') -Raw) -replace '\{\{VERSION\}\}', $version
-$header = Get-Content (Join-Path $PSScriptRoot 'skill-header.md') -Raw
-Set-Content -Path (Join-Path $stage 'README.md') -Value $manual -Encoding utf8 -NoNewline
-Set-Content -Path (Join-Path $stage 'SKILL.md') -Value ($header + $manual) -Encoding utf8 -NoNewline
+# Explicit UTF-8 both ways, without a byte-order mark: Windows PowerShell 5.1
+# otherwise reads the manual as ANSI and writes a BOM, which turned every
+# non-ASCII character in a shipped README into mojibake once.
+$utf8 = [System.Text.UTF8Encoding]::new($false)
+$manual = [System.IO.File]::ReadAllText((Join-Path $repo 'MANUAL.md'), $utf8) -replace '\{\{VERSION\}\}', $version
+$header = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'skill-header.md'), $utf8)
+[System.IO.File]::WriteAllText((Join-Path $stage 'README.md'), $manual, $utf8)
+[System.IO.File]::WriteAllText((Join-Path $stage 'SKILL.md'), ($header + $manual), $utf8)
 
 if ($os -eq 'windows') {
     $archive = Join-Path $releaseDir "$name.zip"

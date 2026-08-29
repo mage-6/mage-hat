@@ -39,6 +39,7 @@ pub fn inspect_site(root: &Path) -> Result<Json> {
             "magehat new page <name> [--lang xx]": "create a page file with the right shape",
             "magehat new component <name>": "create a component file, used as <x-name>",
             "magehat new item <collection> <id> [--lang xx]": "create a content item with metadata",
+            "magehat add [name]": "list the ready-made components, or copy one into src/components",
             "magehat dev [--port N]": "serve dist/ locally with live reload",
             "magehat inspect --json": "this description of the site",
             "magehat clean": "remove dist/ and the image cache",

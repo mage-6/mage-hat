@@ -75,7 +75,7 @@ fn scaffold_builds_clean() {
     let r = run_check(&site).unwrap();
     assert!(r.errors.is_empty(), "{:?}", r.errors);
     assert!(r.warnings.is_empty(), "{:?}", r.warnings.iter().map(|w| w.to_string()).collect::<Vec<_>>());
-    for key in ["index.html", "about/index.html", "blog/index.html", "blog/hello-world/index.html", "404.html", "sitemap.xml", "robots.txt", "site.css", "blog/feed.xml"] {
+    for key in ["index.html", "about/index.html", "blog/index.html", "blog/hello-world/index.html", "404.html", "sitemap.xml", "robots.txt", "site.css", "favicon.svg", "blog/feed.xml"] {
         assert!(r.outputs.contains_key(key), "missing {key}");
     }
     assert!(!site.join("AGENTS.md").exists() && !site.join(".claude").exists(), "init writes the site and nothing else");
@@ -325,7 +325,7 @@ fn scaffold_matches_golden() {
 #[test]
 fn bare_command_lists_commands_from_the_manual() {
     let usage = magehat::cli::usage();
-    for cmd in ["magehat check", "magehat build", "magehat dev", "magehat init", "magehat clean"] {
+    for cmd in ["magehat check", "magehat build", "magehat dev", "magehat init", "magehat clean", "magehat add"] {
         assert!(usage.contains(cmd), "{cmd} missing from:\n{usage}");
     }
     assert!(usage.contains("Run `magehat -h`"), "no pointer to the manual");
@@ -423,4 +423,125 @@ fn google_fonts_are_served_locally() {
     let r = run_check(&site).unwrap();
     let got: Vec<String> = r.warnings.iter().map(|w| w.to_string()).collect();
     assert!(got.iter().any(|w| w == "src/assets/site.css: stylesheet imports fonts from Google"), "{got:?}");
+}
+
+/// Every ready-made component: copied into a fresh site by `add`, identical
+/// to the library file, and the site still checks clean. The scaffold uses
+/// the FAQ, so its output is checked here too.
+#[test]
+fn ready_made_components_build_clean() {
+    let site = scaffold("library");
+    for e in magehat::library::LIBRARY {
+        let rel = format!("src/components/{}.html", e.name);
+        let _ = std::fs::remove_file(site.join(&rel));
+        let msg = magehat::library::add(&site, e.name).unwrap();
+        assert!(msg.contains(&format!("Use it as <x-{}", e.name)), "{msg}");
+        assert_eq!(std::fs::read_to_string(site.join(&rel)).unwrap(), e.file);
+        assert!(magehat::library::add(&site, e.name).unwrap_err().message.contains("already exists"));
+    }
+    assert!(magehat::library::add(&site, "nope").unwrap_err().fix.as_deref().unwrap().contains("faq"));
+    assert!(magehat::library::listing().contains("  faq  "));
+    let r = run_check(&site).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings.iter().map(|w| w.to_string()).collect::<Vec<_>>());
+    let about = text(&r, "about/index.html");
+    assert!(about.contains("<details class=\"faq-item\" name=\"about\">") && about.contains("<span>Does the site need a server?</span>"), "{about}");
+    assert!(about.contains("<x-faq group=\"about\" schema=\"faq\">"), "list props stay off the tag: {about}");
+    assert!(about.contains("\"@type\":\"FAQPage\"") && about.contains("\"name\":\"Does the site need a server?\""), "{about}");
+    assert!(about.contains("\"text\":\"magehat new page <name>, then"), "answers are JSON strings: {about}");
+    assert!(about.contains("<div class=\"faq-answer\">magehat new page &lt;name&gt;, then"), "and escaped text on the page: {about}");
+    let css = r.outputs.iter().find(|(k, _)| k.starts_with("_mh/x-faq.")).map(|(_, v)| String::from_utf8(v.clone()).unwrap()).unwrap();
+    assert!(css.contains(".faq-item[open]::details-content{block-size:auto;block-size:calc-size(auto,size)}"), "{css}");
+
+    // Items from a collection: title and body instead of question and answer,
+    // ordered by `order`, answers as HTML, and no schema unless asked.
+    std::fs::create_dir_all(site.join("src/content/help")).unwrap();
+    std::fs::write(site.join("src/content/help/b.md"), "---\ntitle: Second?\norder: 2\n---\nWith a [link](/about/).\n").unwrap();
+    std::fs::write(site.join("src/content/help/a.md"), "---\ntitle: First?\norder: 1\n---\nYes.\n").unwrap();
+    page(&site, "help.html", "<x-faq items=\"{{ help }}\" group=\"\"></x-faq>");
+    let r = run_check(&site).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    let help = text(&r, "help/index.html");
+    assert!(!help.contains("FAQPage"), "{help}");
+    assert!(help.find("First?").unwrap() < help.find("Second?").unwrap(), "order key: {help}");
+    assert!(help.contains("<div class=\"faq-answer\"><p>With a <a href=\"/about/\">link</a>.</p>"), "{help}");
+}
+
+#[test]
+fn or_writes_a_default() {
+    let site = scaffold("or");
+    page(&site, "d.html", "<p>{{ page.image or site.image }}|{{ nothing or 'x' }}|{{ site.name or 'y' }}</p>");
+    let r = build_site(&site).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    assert!(text(&r, "d/index.html").contains("<p>/photos/hat.jpg|x|My Site</p>"));
+    assert!(text(&r, "index.html").contains("<meta property=\"og:image\" content=\"https://example.com/photos/hat.jpg\">"));
+    page(&site, "d.html", "<p>{{ nothing }}</p>");
+    assert!(build_site(&site).unwrap().errors[0].message.contains("undefined variable"), "still an error without `or`");
+}
+
+#[test]
+fn noindex_pages_stay_out_of_the_sitemap() {
+    let site = scaffold("noindex");
+    std::fs::write(
+        site.join("src/pages/thanks.html"),
+        "<title>Thanks</title>\n<meta name=\"description\" content=\"d\">\n<meta name=\"robots\" content=\"noindex\">\n<x-base><p>ok</p></x-base>\n",
+    )
+    .unwrap();
+    let r = run_check(&site).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings.iter().map(|w| w.to_string()).collect::<Vec<_>>());
+    let thanks = text(&r, "thanks/index.html");
+    assert!(thanks.contains("<meta name=\"robots\" content=\"noindex\">"), "{thanks}");
+    assert_eq!(thanks.matches("name=\"robots\"").count(), 1);
+    let sitemap = text(&r, "sitemap.xml");
+    assert!(!sitemap.contains("/thanks/") && sitemap.contains("/about/"), "{sitemap}");
+}
+
+#[test]
+fn anchors_and_social_images_are_checked() {
+    let site = scaffold("anchors");
+    page(
+        &site,
+        "a.html",
+        "<h2 id=\"here\">x</h2><a href=\"#here\">ok</a><a href=\"#nope\">bad</a><a href=\"/about/#questions\">ok</a><a href=\"/about/#missing\">bad</a><a href=\"https://x.y/#z\">ext</a>",
+    );
+    let r = run_check(&site).unwrap();
+    let got: Vec<String> = r.warnings.iter().map(|w| w.message.clone()).collect();
+    assert_eq!(got.len(), 2, "{got:?}");
+    assert!(got[0].contains("\"#nope\"") && got[1].contains("\"/about/#missing\""), "{got:?}");
+
+    let layout = std::fs::read_to_string(site.join("src/components/base.html")).unwrap();
+    std::fs::write(site.join("src/components/base.html"), layout.replace("content=\"{{ site.url }}{{ page.image or site.image }}\"", "content=\"{{ page.image or site.image }}\"")).unwrap();
+    page(&site, "a.html", "<p>x</p>");
+    let r = run_check(&site).unwrap();
+    let got: Vec<String> = r.warnings.iter().map(|w| w.to_string()).collect();
+    assert!(got.iter().any(|w| w.starts_with("src/pages/index.html: og:image \"/photos/hat.") && w.ends_with("on / is not an absolute URL")), "{got:?}");
+}
+
+#[test]
+fn asset_and_icon_folders_can_live_outside_src() {
+    let site = scaffold("outside");
+    let kit = site.join("kit");
+    std::fs::create_dir_all(&kit).unwrap();
+    std::fs::write(kit.join("logo.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1 1\"><rect width=\"1\" height=\"1\"/></svg>").unwrap();
+    let toml = std::fs::read_to_string(site.join("site.toml")).unwrap();
+    std::fs::write(site.join("site.toml"), format!("{toml}\n[assets]\nbrand = \"kit\"\n[icons]\nbrand = \"kit\"\n")).unwrap();
+    page(&site, "b.html", "<svg icon=\"brand:nope\"></svg>");
+    let r = build_site(&site).unwrap();
+    assert!(r.errors[0].message.contains("no icon named nope in the brand folder (kit)"), "{:?}", r.errors);
+    assert!(r.notes.is_empty(), "a mapped set is never downloaded into");
+
+    page(&site, "b.html", "<img src=\"/brand/logo.svg\" alt=\"logo\"><svg icon=\"brand:logo\" class=\"i\"></svg>");
+    let r = run_check(&site).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings.iter().map(|w| w.to_string()).collect::<Vec<_>>());
+    assert!(r.outputs.contains_key("brand/logo.svg"));
+    let html = text(&r, "b/index.html");
+    assert!(html.contains("<img src=\"/brand/logo.") && html.contains("viewBox=\"0 0 1 1\" class=\"i\"><rect"), "{html}");
+
+    std::fs::write(site.join("site.toml"), format!("{toml}\n[assets]\nbrand = \"missing\"\n")).unwrap();
+    let r = build_site(&site).unwrap();
+    assert!(r.errors.iter().any(|e| e.message.contains("does not exist")), "{:?}", r.errors);
+    std::fs::write(site.join("site.toml"), format!("{toml}\n[assets]\nBrand = \"kit\"\n")).unwrap();
+    assert!(build_site(&site).err().expect("expected an error").message.contains("lowercase"));
 }

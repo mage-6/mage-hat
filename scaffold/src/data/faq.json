@@ -1,0 +1,14 @@
+[
+  {
+    "question": "Does the site need a server?",
+    "answer": "Only to serve the files. dist/ is plain HTML, CSS and images; any static host works, and magehat dev serves it while you work."
+  },
+  {
+    "question": "Where does the design live?",
+    "answer": "In src/assets/site.css: tokens first, then what each element looks like, then variants. Components style only their own markup."
+  },
+  {
+    "question": "How do I add a page?",
+    "answer": "magehat new page <name>, then write HTML inside <x-base>. The build adds canonical links, the sitemap and the rest."
+  }
+]

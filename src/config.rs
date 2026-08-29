@@ -7,6 +7,12 @@
 //!     [collections.blog]
 //!     feed = true                       # write /blog/feed.xml
 //!
+//!     [assets]
+//!     brand = "../brand/svg"            # a folder outside src/assets, served at /brand/
+//!
+//!     [icons]
+//!     brand = "../brand/svg"            # a folder outside src/icons, used as icon="brand:x"
+//!
 //! Any other top-level key is exposed to templates as site.<key>.
 
 use crate::errors::{MageError, Result};
@@ -23,6 +29,10 @@ pub struct Config {
     pub url: String,
     pub languages: Vec<String>,
     pub collections: IndexMap<String, toml::Table>,
+    /// Extra asset folders: output folder name -> path relative to the site root.
+    pub assets: IndexMap<String, String>,
+    /// Extra icon sets: set name -> folder of SVGs, relative to the site root.
+    pub icons: IndexMap<String, String>,
     pub extra: toml::Table,
 }
 
@@ -104,10 +114,35 @@ pub fn load_config(root: &Path) -> Result<Config> {
         }
         Some(_) => return Err(MageError::in_file("[collections] must be a table", "site.toml")),
     };
+    let assets = folder_table(&mut table, "assets", "served at /<name>/")?;
+    let icons = folder_table(&mut table, "icons", "used as icon=\"<name>:file\"")?;
     let url = table.remove("url").and_then(|v| v.as_str().map(|s| s.trim_end_matches('/').to_string())).unwrap_or_default();
     let name = table
         .remove("name")
         .and_then(|v| v.as_str().map(String::from))
         .unwrap_or_else(|| root.canonicalize().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_else(|| "site".into()));
-    Ok(Config { root: root.to_path_buf(), name, url, languages, collections, extra: table })
+    Ok(Config { root: root.to_path_buf(), name, url, languages, collections, assets, icons, extra: table })
+}
+
+/// `[assets]` or `[icons]`: names mapped to folders. The folders must exist,
+/// so a mapping that points nowhere fails here rather than building a site
+/// with silently missing files.
+fn folder_table(table: &mut toml::Table, key: &str, role: &str) -> Result<IndexMap<String, String>> {
+    let mut out = IndexMap::new();
+    let Some(value) = table.remove(key) else { return Ok(out) };
+    let toml::Value::Table(t) = value else {
+        return Err(MageError::in_file(format!("[{key}] must be a table of name = \"folder\""), "site.toml")
+            .fix(format!("[{key}]\nbrand = \"../brand/svg\"   # {role}")));
+    };
+    for (name, v) in t {
+        let ok = !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        if !ok {
+            return Err(MageError::in_file(format!("[{key}] name {name:?} must be lowercase letters, digits and dashes"), "site.toml"));
+        }
+        let Some(dir) = v.as_str() else {
+            return Err(MageError::in_file(format!("[{key}] {name} must be a folder path in quotes"), "site.toml"));
+        };
+        out.insert(name, dir.trim_end_matches(['/', '\\']).to_string());
+    }
+    Ok(out)
 }

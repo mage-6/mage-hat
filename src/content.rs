@@ -88,6 +88,7 @@ pub fn load_collections(cfg: &Config) -> Result<Collections> {
             check_duplicates(items)?;
             items.sort_by(|a, b| a.id.cmp(&b.id));
             items.sort_by(|a, b| date_key(b).cmp(&date_key(a)));
+            items.sort_by(|a, b| order_key(a).partial_cmp(&order_key(b)).unwrap_or(std::cmp::Ordering::Equal));
         }
         out.insert(name, by_lang);
     }
@@ -96,6 +97,20 @@ pub fn load_collections(cfg: &Config) -> Result<Collections> {
 
 fn date_key(item: &Item) -> String {
     item.meta.get("date").map(to_text).unwrap_or_default()
+}
+
+/// An explicit `order` puts an item ahead of the dated ones, lowest first;
+/// it is for collections with no dates (a FAQ, a team, a feature list).
+fn order_key(item: &Item) -> (bool, f64) {
+    match item.meta.get("order") {
+        Some(Value::Int(n)) => (false, *n as f64),
+        Some(Value::Float(n)) => (false, *n),
+        Some(v) => match to_text(v).trim().parse::<f64>() {
+            Ok(n) => (false, n),
+            Err(_) => (true, 0.0),
+        },
+        None => (true, 0.0),
+    }
 }
 
 fn load_item(path: &std::path::Path, rel: &str, collection: &str, id: String, lang: String) -> Result<Item> {

@@ -96,6 +96,12 @@ whole document; pages land in the `<slot>`):
 
 `magehat new page <name>`, `new component <name>` and `new item <collection> <id>`
 create correctly shaped files; prefer them over writing files from scratch.
+`magehat add faq` copies a ready-made component in (see below).
+
+A folder outside `src/` joins in through site.toml, paths relative to it:
+`[assets] brand = "../brand/svg"` serves that folder at `/brand/`, and
+`[icons] brand = "../brand/svg"` makes it the icon set `brand:`. A shared
+brand kit stays where it is instead of being copied or linked.
 
 ## Pages
 
@@ -111,9 +117,14 @@ Wrap it in the layout:
     </x-base>
 
 Leading `<title>` and `<meta name= content=>` elements are the page's
-metadata, available as `page.title`, `page.description`, `page.<name>`.
-Every page needs a title and a description. `404.html` becomes `/404.html`.
-Folders nest: `src/pages/shop/hats.html` -> `/shop/hats/`.
+metadata, available as `page.title`, `page.description`, `page.<name>`;
+they are not part of the body, the layout writes the head from them.
+`page.url`, `page.lang` and `page.id` are always set. Every page needs a
+title and a description. `404.html` becomes `/404.html`. Folders nest:
+`src/pages/shop/hats.html` -> `/shop/hats/`. A page that starts with
+`<meta name="robots" content="noindex">` gets that tag in its head and is
+left out of the sitemap. A `<style>` or `<script>` in a page is left where
+it is.
 
 ## Components
 
@@ -135,9 +146,29 @@ and the globals, never the caller's variables. A prop the caller may omit is
 tested with `if="prop"`.
 
 The `<x-card>` element stays in the output, so a script can
-`customElements.define('x-card', ...)`. Styles are scoped to the component's
-own markup (native `@scope`) and do not reach into nested components; global
-styles go in `src/assets/site.css`.
+`customElements.define('x-card', ...)`. Styles are scoped (native `@scope`):
+they reach the component's own markup and whatever is slotted into it, and
+stop at nested components. Each component's CSS becomes its own stylesheet,
+loaded only by pages that use the component; what applies everywhere goes in
+`src/assets/site.css`, which the sample site lays out as tokens, then bare
+elements, then variants. A component reads those tokens (`var(--accent)`)
+rather than repeating a value.
+
+## Ready-made components
+
+    magehat add            list them
+    magehat add faq        copy one into src/components/faq.html
+
+A ready-made component is an ordinary component file, copied into the site,
+which owns it from then on: leave it as it is and set its tokens, or restyle
+it. The comment at the top of each file is its contract: the props it takes,
+the CSS custom properties it reads (set them on the element, or on `:root`
+for the whole site), the attributes that switch a variant, and the class
+names of its parts, which never change. Improvements belong in MageHat, not
+in one site's copy.
+
+    faq    accordion of questions: <details> with a CSS-only animation,
+           FAQPage structured data from the same items
 
 ## Expressions
 
@@ -153,12 +184,15 @@ Expressions: dotted paths, 'strings', numbers, true, false, null, `not`,
 no arithmetic, no functions, no `else`, no `{% %}` blocks, no includes:
 compute values in metadata or `src/data`, and write a second element with
 `if="not cond"` instead of else. Printing an undefined variable is an error;
-testing one with `if` is not. Globals: `site`, `t`, `lang`, `page`, `data`,
-and one list per collection.
+testing one with `if` is not, and neither is `{{ page.image or site.image }}`:
+`or` is how a default is written, so a missing left side counts as false.
+Globals: `site`, `t`, `lang`, `page`, `data`, and one list per collection.
 
 ## Collections
 
-A folder of items with the same shape, ordered by `date` (newest first):
+A folder of items with the same shape, ordered by `date` (newest first), or
+by `order: 1` in the metadata (lowest first, ahead of dated items) for a
+list that has no dates, such as a FAQ or a team:
 
     src/content/blog/hats-in-2026.md          default language
     src/content/blog/hats-in-2026.pt-BR.md    the same item in Portuguese
@@ -258,11 +292,13 @@ the build. Canonical, hreflang, sitemap.xml and robots.txt are generated.
     magehat -h                the manual: the complete reference
     magehat check [--json]    errors and warnings, each with its fix: undefined
                               variables, foreign syntax, unclosed tags, missing
-                              translations, broken links, missing title,
-                              description or alt text, duplicate ids
+                              translations, broken links and anchors, missing
+                              title, description or alt text, duplicate ids,
+                              a relative social image, fonts still on Google
     magehat build [--json]    write dist/
     magehat new ...           page <name> | component <name> | item <coll> <id>
                               (--lang xx for a translation of a page or item)
+    magehat add [name]        list the ready-made components, or copy one in
     magehat dev [--port N]    local server with live reload
     magehat inspect [--json]  pages, components with props and a usage example,
                               collections, languages, i18n keys

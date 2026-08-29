@@ -126,6 +126,17 @@ fn run(argv: &[String]) -> Result<i32> {
             println!("{}", crate::new::new(&root, kind, rest, args.lang.as_deref())?);
             Ok(0)
         }
+        "add" => match args.positional.first() {
+            None => {
+                println!("{}", crate::library::listing());
+                Ok(0)
+            }
+            Some(name) => {
+                let root = site_root()?;
+                println!("{}", crate::library::add(&root, name)?);
+                Ok(0)
+            }
+        },
         "build" => {
             let root = site_root()?;
             let result = crate::build::build_site(&root)?;

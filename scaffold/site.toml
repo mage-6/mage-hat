@@ -2,9 +2,21 @@
 name = "My Site"
 url = "https://example.com"
 
+# Used by the layout: the social preview image (1200x630 for the best result)
+# and the organisation's logo in structured data. A page overrides the image
+# with <meta name="image" content="/...">.
+image = "/photos/hat.jpg"
+
 # First language is the default and lives at the site root.
 # Others get a prefix: languages = ["en", "pt-BR"] puts Portuguese under /pt-br/.
 languages = ["en"]
 
 [collections.blog]
 feed = true
+
+# Folders outside src/ can be served or used as icon sets, for a brand kit
+# shared with other projects:
+#   [assets]
+#   brand = "../brand/svg"     # served at /brand/
+#   [icons]
+#   brand = "../brand/svg"     # icon="brand:logo" reads ../brand/svg/logo.svg

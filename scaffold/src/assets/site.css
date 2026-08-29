@@ -1,23 +1,177 @@
-/* Global styles. Files in src/assets are copied to the site root as they are,
-   so this is served at /site.css. Component styles are scoped to their own
-   markup; anything that should apply everywhere belongs here. */
+/* The site's stylesheet, served at /site.css. Three layers, in this order:
+
+   1. Tokens: every colour, size and duration, once, as custom properties.
+   2. Elements: what a bare tag looks like. A <button> is styled here as
+      `button`, not as a class you have to remember to add.
+   3. Variants: a class only where an element comes in more than one kind
+      (button.ghost), never for the default look.
+
+   Components style their own markup in their own file (scoped to them)
+   and read these tokens; nothing in a component repeats a value from here.
+   Layout that belongs to one section lives in that section's component. */
+
+/* ---- 1. Tokens ---- */
 
 :root {
-  font-family: system-ui, sans-serif;
-  line-height: 1.5;
-  color: #222;
+  color-scheme: light dark;
+
+  --fg: light-dark(#1f2328, #e6edf3);
+  --bg: light-dark(#ffffff, #0d1117);
+  --muted: light-dark(#59636e, #9198a1);
+  --rule: light-dark(#d1d9e0, #3d444d);
+  --surface: light-dark(#f6f8fa, #161b22);
+  --accent: light-dark(#0969da, #4493f8);
+  --on-accent: #ffffff;
+
+  --font: system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+  --text-s: 0.875rem;
+  --text-m: 1rem;
+  --text-l: 1.25rem;
+  --text-xl: 2rem;
+  --leading: 1.5;
+  --measure: 42rem;
+
+  --space-xs: 0.25rem;
+  --space-s: 0.5rem;
+  --space-m: 1rem;
+  --space-l: 2rem;
+
+  --radius: 6px;
+  --duration: 150ms;
+}
+
+/* ---- 2. Elements ---- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font);
+  font-size: var(--text-m);
+  line-height: var(--leading);
+  color: var(--fg);
+  background: var(--bg);
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
 }
 
+h1,
+h2,
+h3 {
+  line-height: 1.2;
+  margin: 0 0 var(--space-m);
+  text-wrap: balance;
+}
+
+h1 { font-size: var(--text-xl); }
+h2 { font-size: var(--text-l); margin-top: var(--space-l); }
+h3 { font-size: var(--text-m); margin-top: var(--space-m); }
+
+p,
+ul,
+ol {
+  margin: 0 0 var(--space-m);
+}
+
 a {
-  color: #0645ad;
+  color: var(--accent);
+}
+
+img,
+svg,
+video {
+  max-width: 100%;
+  height: auto;
+}
+
+svg {
+  vertical-align: -0.125em;
+}
+
+button,
+a.button {
+  display: inline-block;
+  padding: var(--space-s) var(--space-m);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--duration);
+}
+
+button:hover,
+a.button:hover {
+  background: color-mix(in srgb, var(--accent) 85%, var(--fg));
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+  padding: var(--space-s);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-s);
 }
 
 pre {
-  background: #f4f4f4;
-  padding: 1rem;
+  background: var(--surface);
+  padding: var(--space-m);
+  border-radius: var(--radius);
   overflow-x: auto;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--rule);
+  margin: var(--space-l) 0;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th,
+td {
+  text-align: left;
+  padding: var(--space-s);
+  border-bottom: 1px solid var(--rule);
+}
+
+/* ---- 3. Variants ---- */
+
+/* A second kind of button: same shape, no fill. */
+button.ghost,
+a.button.ghost {
+  background: transparent;
+  color: var(--accent);
+}
+
+button.ghost:hover,
+a.button.ghost:hover {
+  background: var(--surface);
 }

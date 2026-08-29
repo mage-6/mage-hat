@@ -1,5 +1,6 @@
 <!-- The page layout: a component whose template is a whole document.
-     Pages wrap their content in <x-base>; it lands in the <slot>. -->
+     Pages wrap their content in <x-base>; it lands in the <slot>.
+     Canonical, hreflang and the sitemap are added by the build. -->
 <template>
 <!doctype html>
 <html lang="{{ lang }}">
@@ -8,14 +9,44 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ page.title }} · {{ site.name }}</title>
   <meta name="description" content="{{ page.description }}">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/site.css">
-  <!-- Structured data: a JSON-LD script is a template like the rest. -->
+
+  <!-- Social previews. A page picks its own image with
+       <meta name="image" content="/photos/x.jpg"> at its top; site.image
+       (site.toml) is the fallback. Absolute URLs: crawlers do not resolve
+       relative ones, and `magehat check` says so. -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{{ site.name }}">
+  <meta property="og:title" content="{{ page.title }}">
+  <meta property="og:description" content="{{ page.description }}">
+  <meta property="og:url" content="{{ site.url }}{{ page.url }}">
+  <meta property="og:image" content="{{ site.url }}{{ page.image or site.image }}">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <!-- Structured data: a JSON-LD script is a template like the rest.
+       Organization and WebSite belong on every page; anything about one
+       page (Article, FAQPage) sits with that page's content. -->
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
-    "@type": "WebSite",
-    "name": "{{ site.name }}",
-    "url": "{{ site.url }}/"
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "{{ site.url }}/#organization",
+        "name": "{{ site.name }}",
+        "url": "{{ site.url }}/",
+        "logo": "{{ site.url }}{{ site.image }}"
+      },
+      {
+        "@type": "WebSite",
+        "@id": "{{ site.url }}/#website",
+        "name": "{{ site.name }}",
+        "url": "{{ site.url }}/",
+        "inLanguage": "{{ lang }}",
+        "publisher": { "@id": "{{ site.url }}/#organization" }
+      }
+    ]
   }
   </script>
 </head>
@@ -32,6 +63,6 @@
 </template>
 
 <style>
-  main { max-width: 42rem; margin: 0 auto; padding: 2rem 1rem; }
-  footer { text-align: center; color: #666; padding: 2rem; }
+  main { max-width: var(--measure); margin: 0 auto; padding: var(--space-l) var(--space-m); }
+  footer { text-align: center; color: var(--muted); padding: var(--space-l); }
 </style>

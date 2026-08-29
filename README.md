@@ -52,7 +52,12 @@ specific site; `check --json` and `build --json` report findings as
 ## What the build does for you
 
 - Components with scoped CSS and per-page JS, included only where used.
-- Translations, localized links, canonical and hreflang, sitemap, RSS.
+- Ready-made components (`magehat add faq`): copied into the site, built by
+  a test on every release, themed through custom properties.
+- Translations, localized links, canonical and hreflang, sitemap (minus
+  `noindex` pages), RSS.
+- Folders outside `src/` served or used as icon sets through `[assets]` and
+  `[icons]` in site.toml, for a brand kit shared between projects.
 - Icons: `<svg icon="lucide:shield">` inlines any Iconify icon; the SVG is
   downloaded once into `src/icons/` and is source from then on.
 - Fonts: a Google Fonts `<link>` is fetched once into `src/assets/fonts/`
@@ -62,8 +67,9 @@ specific site; `check --json` and `build --json` report findings as
   resized 1x/2x variants, cached in `.magehat/cache` by content hash.
 - Content-hashed asset names with references rewritten; minified output.
 - `check` finds undefined variables, syntax from other template languages,
-  unclosed tags, broken links, missing titles, descriptions and alt text,
-  duplicate ids, and missing translations, and says how to fix each one.
+  unclosed tags, broken links and anchors, missing titles, descriptions and
+  alt text, duplicate ids, relative social images, and missing translations,
+  and says how to fix each one.
 
 ## Principles
 

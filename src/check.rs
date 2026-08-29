@@ -26,10 +26,91 @@ pub fn run_check(root: &Path) -> Result<BuildResult> {
     check_markup(&mut r);
     check_translations(&mut r);
     check_links(&mut r);
+    check_anchors(&mut r);
     check_seo(&mut r);
+    check_open_graph(&mut r);
     check_i18n_parity(&mut r);
     check_external_fonts(&mut r);
     Ok(r)
+}
+
+static ROBOTS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?is)<meta\s[^>]*name\s*=\s*["']robots["'][^>]*content\s*=\s*["']([^"']*)["']"#).unwrap());
+static ROBOTS2: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?is)<meta\s[^>]*content\s*=\s*["']([^"']*)["'][^>]*name\s*=\s*["']robots["']"#).unwrap());
+static ID_ATTR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)<[a-z][^>]*\sid\s*=\s*["']([^"']+)["']"#).unwrap());
+static OG_IMAGE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?is)<meta\s[^>]*property\s*=\s*["']og:image["'][^>]*content\s*=\s*["']([^"']*)["']"#).unwrap());
+
+/// Whether a rendered page carries <meta name="robots" content="noindex...">.
+pub fn is_noindex(html: &str) -> bool {
+    ROBOTS
+        .captures(html)
+        .or_else(|| ROBOTS2.captures(html))
+        .map_or(false, |c| c[1].to_ascii_lowercase().contains("noindex"))
+}
+
+/// Every `#fragment` link, on the same page or on another, must name an id
+/// that exists there.
+fn check_anchors(r: &mut BuildResult) {
+    let ids: std::collections::HashMap<&str, std::collections::HashSet<String>> = r
+        .pages
+        .iter()
+        .map(|p| {
+            let html = String::from_utf8_lossy(&r.outputs[&p.out]);
+            (p.out.as_str(), ID_ATTR.captures_iter(&html).map(|c| c[1].to_string()).collect())
+        })
+        .collect();
+    let mut warnings = Vec::new();
+    for p in &r.pages {
+        let html = String::from_utf8_lossy(&r.outputs[&p.out]);
+        let mut seen = std::collections::HashSet::new();
+        for m in LINK.captures_iter(&html) {
+            let link = m[1].trim().to_string();
+            let Some((path, fragment)) = link.split_once('#') else { continue };
+            if fragment.is_empty() || link.starts_with("//") || SCHEME.is_match(&link) || !seen.insert(link.clone()) {
+                continue;
+            }
+            let path = path.split('?').next().unwrap_or("");
+            let target = if path.is_empty() {
+                p.out.clone()
+            } else {
+                let mut t = if path.starts_with('/') { path.to_string() } else {
+                    let dir = p.url.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+                    normalize(&format!("{dir}/{path}"))
+                };
+                if t.ends_with('/') { t.push_str("index.html"); }
+                t.trim_start_matches('/').to_string()
+            };
+            match ids.get(target.as_str()) {
+                Some(page_ids) if !page_ids.contains(fragment) => {
+                    warnings.push((format!("link {link:?} on {} points at an id that is not on that page", p.url), p.file.clone()));
+                }
+                _ => {} // not a page we built (an asset, or reported by check_links)
+            }
+        }
+    }
+    for (m, f) in warnings {
+        r.warn_at(m, &f, None, "give the target element id=\"...\" matching the fragment, or fix the link");
+    }
+}
+
+/// A social preview image must be an absolute URL; crawlers do not resolve
+/// relative ones.
+fn check_open_graph(r: &mut BuildResult) {
+    let mut warnings = Vec::new();
+    for p in &r.pages {
+        let html = String::from_utf8_lossy(&r.outputs[&p.out]);
+        if let Some(c) = OG_IMAGE.captures(&html) {
+            let url = c[1].trim().to_string();
+            if !url.starts_with("http://") && !url.starts_with("https://") {
+                warnings.push((format!("og:image {url:?} on {} is not an absolute URL", p.url), p.file.clone()));
+            }
+        }
+    }
+    for (m, f) in warnings {
+        r.warn_at(m, &f, None, "write content=\"{{ site.url }}/og.png\": social networks need the full address, and site.url is the site's own");
+    }
 }
 
 /// A Google Fonts <link> is served locally by the build; anything else that

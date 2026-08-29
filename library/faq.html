@@ -1,0 +1,126 @@
+<!-- FAQ accordion. Native <details>/<summary>, opened and closed by a CSS
+     animation (no script), and optional FAQPage structured data built from
+     the same items as the visible questions, so the two cannot drift.
+
+       <x-faq items="{{ data.faq }}" group="faq" schema="faq"></x-faq>
+
+     Props
+       items   a list of { question, answer }, from src/data/faq.json or a
+               collection ({{ item.title }} and {{ item.body }} work too, so
+               answers with links can be Markdown items)
+       group   one item of a group is open at a time; group="" makes them
+               independent. Unique per page: two accordions sharing a group
+               would close each other.
+       schema  schema="faq" adds FAQPage JSON-LD. Only on the page where the
+               questions are visible; search engines penalise the mismatch.
+
+     Tokens (set on x-faq, or on :root for the whole site)
+       --faq-border          line between items
+       --faq-padding         around a question
+       --faq-question-size   font size of a question
+       --faq-question-weight
+       --faq-answer-color
+       --faq-duration        open and close time
+
+     Parts, for the site's own CSS: .faq, .faq-item, .faq-question,
+     .faq-chevron, .faq-answer. These names do not change. -->
+<template>
+  <div class="faq">
+    <details class="faq-item" name="{{ group }}" each="item in items">
+      <summary class="faq-question">
+        <span>{{ item.question or item.title }}</span>
+        <svg icon="lucide:chevron-down" class="faq-chevron" aria-hidden="true"></svg>
+      </summary>
+      <div class="faq-answer">{{ item.answer or item.body }}</div>
+    </details>
+  </div>
+  <script type="application/ld+json" if="schema == 'faq'">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      <template each="item in items">
+      {
+        "@type": "Question",
+        "name": "{{ item.question or item.title }}",
+        "acceptedAnswer": { "@type": "Answer", "text": "{{ item.answer or item.body }}" }
+      },
+      </template>
+    ]
+  }
+  </script>
+</template>
+
+<style>
+  .faq-item {
+    border-bottom: 1px solid var(--faq-border, color-mix(in srgb, currentColor 20%, transparent));
+  }
+  .faq-item:last-child {
+    border-bottom: 0;
+  }
+
+  .faq-question {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: var(--faq-padding, 1rem 0);
+    cursor: pointer;
+    font-size: var(--faq-question-size, 1.125rem);
+    font-weight: var(--faq-question-weight, 600);
+    list-style: none;
+  }
+  /* Both are needed: WebKit still uses the legacy pseudo-element. */
+  .faq-question::-webkit-details-marker {
+    display: none;
+  }
+  .faq-question::marker {
+    content: none;
+  }
+  .faq-question > span {
+    flex: 1;
+  }
+
+  .faq-chevron {
+    flex-shrink: 0;
+    width: 1.25em;
+    height: 1.25em;
+    transition: rotate var(--faq-duration, 0.25s) ease;
+  }
+  .faq-item[open] .faq-chevron {
+    rotate: 180deg;
+  }
+
+  /* The animation. ::details-content is the box the browser hides and shows;
+     calc-size() lets block-size animate to the content's own height, which
+     used to need a script to measure. allow-discrete keeps the content in
+     the transition on close, instead of it vanishing on the first frame.
+     Browsers without either still open and close, just without motion. */
+  .faq-item::details-content {
+    display: block;
+    block-size: 0;
+    overflow: hidden;
+    transition: block-size var(--faq-duration, 0.3s) ease, content-visibility var(--faq-duration, 0.3s) allow-discrete;
+  }
+  .faq-item[open]::details-content {
+    block-size: auto;
+    block-size: calc-size(auto, size);
+  }
+
+  .faq-answer {
+    padding: 0 0 1rem;
+    color: var(--faq-answer-color, inherit);
+  }
+  .faq-answer > :first-child {
+    margin-top: 0;
+  }
+  .faq-answer > :last-child {
+    margin-bottom: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .faq-item::details-content,
+    .faq-chevron {
+      transition: none;
+    }
+  }
+</style>

@@ -26,14 +26,22 @@ pub struct Svg {
 
 pub struct Icons {
     root: PathBuf,
+    /// Sets that live in a folder of their own ([icons] in site.toml):
+    /// set name -> folder relative to the site root. Never downloaded into.
+    sets: HashMap<String, String>,
     cache: RefCell<HashMap<String, Result<Rc<Svg>, MageError>>>,
     /// Icons downloaded during this build, as "set:name -> file".
     pub fetched: RefCell<Vec<String>>,
 }
 
 impl Icons {
-    pub fn new(root: &Path) -> Icons {
-        Icons { root: root.to_path_buf(), cache: RefCell::new(HashMap::new()), fetched: RefCell::new(Vec::new()) }
+    pub fn new(root: &Path, sets: &indexmap::IndexMap<String, String>) -> Icons {
+        Icons {
+            root: root.to_path_buf(),
+            sets: sets.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            cache: RefCell::new(HashMap::new()),
+            fetched: RefCell::new(Vec::new()),
+        }
     }
 
     /// The site-relative file for an icon name, or None when the name is not `set:name`.
@@ -64,6 +72,18 @@ impl Icons {
                 .fix("icon names are set:name in lowercase, like lucide:shield or simple-icons:github; browse the sets at https://icon-sets.iconify.design")
                 .snippet(name));
         };
+        let (set, icon) = name.split_once(':').unwrap_or((name, ""));
+        if let Some(dir) = self.sets.get(set) {
+            // A set with its own folder is never downloaded into; a missing
+            // file there is the author's, not Iconify's.
+            let rel = format!("{dir}/{icon}.svg");
+            let text = std::fs::read_to_string(self.root.join(&rel)).map_err(|_| {
+                MageError::new(format!("no icon named {icon} in the {set} folder ({dir})"))
+                    .fix(format!("add {rel}, or check the file name; [icons] in site.toml maps {set} to that folder"))
+                    .snippet(name)
+            })?;
+            return parse_svg(&text).ok_or_else(|| MageError::in_file("not an SVG file", &rel).fix("the file must contain an <svg>...</svg> element"));
+        }
         let path = self.root.join(&rel);
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,

@@ -268,7 +268,9 @@ pub fn evaluate(e: &Expr, ctx: &Ctx, lenient: bool) -> std::result::Result<Value
             if truthy(&l) { evaluate(b, ctx, lenient)? } else { l }
         }
         Expr::Or(a, b) => {
-            let l = evaluate(a, ctx, lenient)?;
+            // `a or b` is how a default is written, so a missing `a` is
+            // false here rather than an error: {{ page.image or site.image }}.
+            let l = evaluate(a, ctx, true)?;
             if truthy(&l) { l } else { evaluate(b, ctx, lenient)? }
         }
         Expr::Eq(a, b) => Value::Bool(evaluate(a, ctx, lenient)?.loose_eq(&evaluate(b, ctx, lenient)?)),

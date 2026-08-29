@@ -1,1 +1,0 @@
-x-nav{display:contents}@scope (x-nav) to (:scope :is(x-base,x-card,x-counter,x-nav)>*){nav{display:flex;gap:1rem;padding:1rem;border-bottom:1px solid #ddd}.brand{font-weight:bold;margin-right:auto}svg{vertical-align:-0.125em}}

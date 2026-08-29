@@ -21,6 +21,7 @@ pub mod images;
 pub mod init;
 pub mod inspect;
 pub mod jsonld;
+pub mod library;
 pub mod lint;
 pub mod markdown;
 pub mod minify;

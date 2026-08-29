@@ -143,6 +143,10 @@ fn fetch(url: &str) -> Result<Vec<u8>> {
 pub fn localize_css(css: &str, fetch: &mut dyn FnMut(&str) -> Result<Vec<u8>>) -> Result<(String, Vec<(String, Vec<u8>)>)> {
     let mut out = css.to_string();
     let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    // One file per URL. A variable font comes back as one block per weight,
+    // all pointing at the same file; it is saved once, under the first name
+    // it was met by, and every block points there.
+    let mut names: Vec<(String, String)> = Vec::new();
     for m in FACE.captures_iter(css) {
         let subset = m.get(1).map(|s| slug(s.as_str())).filter(|s| !s.is_empty()).unwrap_or_else(|| "all".into());
         let block = &m[2];
@@ -151,16 +155,21 @@ pub fn localize_css(css: &str, fetch: &mut dyn FnMut(&str) -> Result<Vec<u8>>) -
         let weight = WEIGHT.captures(block).map(|c| slug(&c[1])).unwrap_or_else(|| "400".into());
         for u in URL.captures_iter(block) {
             let url = &u[1];
-            if !url.starts_with("http") {
+            if !url.starts_with("http") || names.iter().any(|(u, _)| u == url) {
                 continue;
             }
             let ext = url.rsplit_once('.').map(|(_, e)| e).unwrap_or("woff2");
-            let name = format!("{family}/{family}-{weight}-{style}-{subset}.{ext}");
-            if !files.iter().any(|(n, _)| n == &name) {
-                files.push((name.clone(), fetch(url)?));
+            let mut name = format!("{family}/{family}-{weight}-{style}-{subset}.{ext}");
+            if files.iter().any(|(n, _)| n == &name) {
+                // Same name, different file (Google sometimes splits a subset in two).
+                name = format!("{family}/{family}-{weight}-{style}-{subset}-{}.{ext}", files.len());
             }
-            out = out.replace(url, &format!("/fonts/{name}"));
+            files.push((name.clone(), fetch(url)?));
+            names.push((url.to_string(), name));
         }
+    }
+    for (url, name) in &names {
+        out = out.replace(url, &format!("/fonts/{name}"));
     }
     if files.is_empty() {
         return Err(MageError::new("the Google Fonts stylesheet names no font files")
@@ -218,6 +227,18 @@ mod tests {
         assert!(css.contains("src: url(/fonts/inter/inter-400-normal-cyrillic.woff2) format('woff2');"), "{css}");
         assert!(!css.contains("gstatic"));
         assert!(localize_css("body { color: red }", &mut |_| Ok(Vec::new())).is_err());
+    }
+
+    /// A variable font: Google lists one block per requested weight, all
+    /// with the same file. Saved once, and every block points at it.
+    #[test]
+    fn a_file_shared_by_several_weights_is_saved_once() {
+        let css = "/* latin */\n@font-face {\n  font-family: 'Figtree';\n  font-weight: 400;\n  src: url(https://fonts.gstatic.com/s/figtree/v1/x.woff2) format('woff2');\n}\n/* latin */\n@font-face {\n  font-family: 'Figtree';\n  font-weight: 700;\n  src: url(https://fonts.gstatic.com/s/figtree/v1/x.woff2) format('woff2');\n}\n";
+        let mut fetched = 0;
+        let (css, files) = localize_css(css, &mut |_| { fetched += 1; Ok(vec![1]) }).unwrap();
+        assert_eq!(fetched, 1);
+        assert_eq!(files.len(), 1);
+        assert_eq!(css.matches("url(/fonts/figtree/figtree-400-normal-latin.woff2)").count(), 2, "{css}");
     }
 
     #[test]

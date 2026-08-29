@@ -1,1 +1,0 @@
-x-counter{display:contents}@scope (x-counter) to (:scope :is(x-base,x-card,x-counter,x-nav)>*){button{padding:.5rem 1rem;font:inherit;cursor:pointer}}

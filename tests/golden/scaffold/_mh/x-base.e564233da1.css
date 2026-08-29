@@ -1,0 +1,1 @@
+@scope (html) to (:scope :is(x-base,x-card,x-counter,x-faq,x-nav)>*){main{max-width:var(--measure);margin:0 auto;padding:var(--space-l) var(--space-m)}footer{text-align:center;color:var(--muted);padding:var(--space-l)}}
