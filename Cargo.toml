@@ -1,6 +1,6 @@
 [package]
 name = "magehat"
-version = "0.3.0"
+version = "0.5.0"
 edition = "2021"
 description = "A tiny, deterministic compiler for plain HTML sites."
 license = "MIT"
@@ -23,6 +23,8 @@ serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
 tiny_http = "0.12"
 toml = "0.8"
+# Only for downloading an icon the first time a build meets it.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 webp = "0.3"
 
 [profile.release]

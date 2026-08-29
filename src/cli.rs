@@ -4,25 +4,36 @@
 use crate::errors::{MageError, Result};
 use std::path::{Path, PathBuf};
 
-const HELP: &str = "\
-magehat: a tiny, deterministic compiler for plain HTML sites
+/// The manual is the documentation: `magehat -h` prints it, and the release
+/// package ships the same text as README.md. Embedding it means an executable
+/// on its own still explains itself, with nothing else to look up.
+const MANUAL: &str = include_str!("../MANUAL.md");
 
-Usage: magehat <command> [options]
+fn manual() -> String {
+    MANUAL.replace("{{VERSION}}", env!("CARGO_PKG_VERSION"))
+}
 
-Commands:
-  init [dir]               create a new site with a sample page, layout, component and post
-  new page <name>          create src/pages/<name>.html with the right shape (--lang xx for a translation)
-  new component <name>     create src/components/<name>.html, used as <x-name>
-  new item <coll> <id>     create src/content/<coll>/<id>.md (--lang xx for a translation)
-  check [--json]           build in memory and report errors and warnings, each with its fix
-  build [--json]           write the site to dist/
-  dev [--port N]           serve the site locally, rebuild on change, reload the browser
-  inspect [--json]         describe the site as JSON (pages, components, collections, languages)
-  clean                    remove dist/ and the image cache
-  skill [--write]          print the language reference, or write it into the current folder
-                           as AGENTS.md, CLAUDE.md and .claude/skills/magehat/SKILL.md
-  --version                print the version
-";
+/// A bare `magehat` prints the command list, lifted from the manual's own
+/// Commands section so the short help and the reference cannot disagree.
+pub fn usage() -> String {
+    let manual = manual();
+    let commands = manual
+        .split_once("\n## Commands\n")
+        .map(|(_, rest)| rest)
+        .unwrap_or_default()
+        .lines()
+        .skip_while(|l| l.trim().is_empty())
+        .take_while(|l| l.starts_with("    ") || l.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "magehat: a tiny, deterministic compiler for plain HTML sites\n\n\
+         Usage: magehat <command> [options]\n\n\
+         Commands:\n{}\n\n\
+         Run `magehat -h` for the manual: install, syntax, everything.\n",
+        commands.trim_end()
+    )
+}
 
 struct Args {
     command: String,
@@ -30,16 +41,14 @@ struct Args {
     json: bool,
     port: u16,
     lang: Option<String>,
-    write: bool,
 }
 
 fn parse_args(argv: &[String]) -> Result<Args> {
-    let mut args = Args { command: String::new(), positional: Vec::new(), json: false, port: 8080, lang: None, write: false };
+    let mut args = Args { command: String::new(), positional: Vec::new(), json: false, port: 8080, lang: None };
     let mut it = argv.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--json" => args.json = true,
-            "--write" => args.write = true,
             "--port" => {
                 let v = it.next().ok_or_else(|| MageError::new("--port needs a number"))?;
                 args.port = v.parse().map_err(|_| MageError::new(format!("--port needs a number, got {v:?}")))?;
@@ -49,7 +58,7 @@ fn parse_args(argv: &[String]) -> Result<Args> {
             }
             "-h" | "--help" | "help" => args.command = "help".into(),
             "-V" | "--version" | "version" => args.command = "version".into(),
-            s if s.starts_with('-') => return Err(MageError::new(format!("unknown option {s}")).fix("run `magehat --help`")),
+            s if s.starts_with('-') => return Err(MageError::new(format!("unknown option {s}")).fix("run `magehat` for the commands, `magehat -h` for the manual")),
             s if args.command.is_empty() => args.command = s.to_string(),
             s => args.positional.push(s.to_string()),
         }
@@ -68,7 +77,7 @@ fn site_root() -> Result<PathBuf> {
         dir = d.parent();
     }
     Err(MageError::new("no site.toml found here or in a parent folder")
-        .fix("create site.toml and src/ as shown under \"A site from nothing\" in AGENTS.md (magehat skill prints it), run `magehat init` for a sample site, or cd into an existing one"))
+        .fix("create site.toml and src/ as shown under \"A site from nothing\" in `magehat -h`, run `magehat init` for a sample site, or cd into an existing one"))
 }
 
 pub fn main() {
@@ -86,8 +95,12 @@ pub fn main() {
 fn run(argv: &[String]) -> Result<i32> {
     let args = parse_args(argv)?;
     match args.command.as_str() {
-        "" | "help" => {
-            print!("{HELP}");
+        "" => {
+            print!("{}", usage());
+            Ok(0)
+        }
+        "help" => {
+            print!("{}", manual());
             Ok(0)
         }
         "version" => {
@@ -103,18 +116,7 @@ fn run(argv: &[String]) -> Result<i32> {
                 println!("  {rel}");
             }
             let cd = if dir == "." { String::new() } else { format!("cd {dir} && ") };
-            println!("\nRead AGENTS.md, then: {cd}magehat check");
-            Ok(0)
-        }
-        "skill" => {
-            if args.write {
-                let here = std::env::current_dir()?;
-                for rel in crate::init::write_agent_files(&here)? {
-                    println!("Wrote {rel}");
-                }
-            } else {
-                print!("{}", crate::init::SKILL);
-            }
+            println!("\nRun `magehat -h` for the manual, then: {cd}magehat check");
             Ok(0)
         }
         "new" => {
@@ -139,6 +141,9 @@ fn run(argv: &[String]) -> Result<i32> {
                     if let Some(fix) = &w.fix {
                         println!("  fix: {fix}");
                     }
+                }
+                for n in &result.notes {
+                    println!("note: {n}");
                 }
             } else {
                 eprintln!("{}", crate::check::format_report(&result));
@@ -181,6 +186,6 @@ fn run(argv: &[String]) -> Result<i32> {
             }
             Ok(0)
         }
-        other => Err(MageError::new(format!("unknown command {other:?}")).fix("run `magehat --help`")),
+        other => Err(MageError::new(format!("unknown command {other:?}")).fix("run `magehat` for the commands, `magehat -h` for the manual")),
     }
 }

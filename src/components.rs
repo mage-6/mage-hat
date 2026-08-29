@@ -151,7 +151,7 @@ pub fn visit(nodes: &[Node], f: &mut dyn FnMut(&Node)) {
     for n in nodes {
         f(n);
         if let Node::Element(e) = n {
-            if !crate::htmltree::RAW.contains(&e.tag.as_str()) {
+            if !e.is_raw() {
                 visit(&e.children, f);
             }
         }

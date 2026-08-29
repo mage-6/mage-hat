@@ -28,7 +28,32 @@ pub fn run_check(root: &Path) -> Result<BuildResult> {
     check_links(&mut r);
     check_seo(&mut r);
     check_i18n_parity(&mut r);
+    check_external_fonts(&mut r);
     Ok(r)
+}
+
+/// A Google Fonts <link> is served locally by the build; anything else that
+/// still reaches Google (an @import, an inline style) is reported.
+fn check_external_fonts(r: &mut BuildResult) {
+    let fix = "load the font with <link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=...\"> in the layout; MageHat then saves the files under src/assets/fonts and serves them from the site. An @import or inline style is not converted";
+    let mut warnings = Vec::new();
+    for p in &r.pages {
+        let html = String::from_utf8_lossy(&r.outputs[&p.out]);
+        if html.contains("fonts.googleapis.com") || html.contains("fonts.gstatic.com") {
+            warnings.push((format!("page still loads fonts from Google on {}", p.url), p.file.clone()));
+        }
+    }
+    for (key, bytes) in &r.outputs {
+        // Original stylesheets only (site.css, not site.<hash>.css).
+        if key.ends_with(".css") && !key.starts_with("_mh/") && key.matches('.').count() == 1 {
+            if String::from_utf8_lossy(bytes).contains("fonts.googleapis.com") {
+                warnings.push(("stylesheet imports fonts from Google".to_string(), format!("src/assets/{key}")));
+            }
+        }
+    }
+    for (m, f) in warnings {
+        r.warn_at(m, &f, None, fix);
+    }
 }
 
 fn check_markup(r: &mut BuildResult) {
@@ -237,6 +262,9 @@ pub fn format_report(r: &BuildResult) -> String {
             lines.push(format!("  fix: {fix}"));
         }
     }
+    for n in &r.notes {
+        lines.push(format!("note: {n}"));
+    }
     lines.push(format!("{} pages, {} errors, {} warnings", r.pages.len(), r.errors.len(), r.warnings.len()));
     lines.join("\n")
 }
@@ -251,5 +279,6 @@ pub fn report_json(r: &BuildResult) -> serde_json::Value {
         "warnings": r.warnings.iter().map(|w| json!({
             "file": w.file, "line": w.line, "message": w.message, "fix": w.fix,
         })).collect::<Vec<_>>(),
+        "notes": r.notes,
     })
 }

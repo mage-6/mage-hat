@@ -12,7 +12,16 @@ pub const VOID: &[&str] = &[
     "track", "wbr",
 ];
 /// Content of these elements is raw text: never interpolated, never parsed.
+/// The one exception is a JSON-LD script, which is a template (see jsonld.rs).
 pub const RAW: &[&str] = &["script", "style"];
+
+pub fn is_json_ld(tag: &str, attrs: &[(String, Option<String>)]) -> bool {
+    tag == "script" && attrs.iter().any(|(k, v)| k == "type" && v.as_deref().map_or(false, |v| v.trim().eq_ignore_ascii_case("application/ld+json")))
+}
+
+pub fn is_raw(tag: &str, attrs: &[(String, Option<String>)]) -> bool {
+    RAW.contains(&tag) && !is_json_ld(tag, attrs)
+}
 
 const BLOCK: &[&str] = &[
     "address", "article", "aside", "blockquote", "div", "dl", "fieldset", "figure", "footer",
@@ -55,6 +64,16 @@ impl Node {
 impl Element {
     pub fn attr(&self, name: &str) -> Option<&str> {
         self.attrs.iter().find(|(k, _)| k == name).map(|(_, v)| v.as_deref().unwrap_or(""))
+    }
+
+    /// A JSON-LD script: parsed and rendered like markup, unlike other scripts.
+    pub fn is_json_ld(&self) -> bool {
+        is_json_ld(&self.tag, &self.attrs)
+    }
+
+    /// Raw text content: never interpolated, never parsed.
+    pub fn is_raw(&self) -> bool {
+        is_raw(&self.tag, &self.attrs)
     }
 
     pub fn has_attr(&self, name: &str) -> bool {
@@ -184,13 +203,14 @@ impl<'a> Parser<'a> {
                 self.close_top(false);
             }
         }
+        let raw = is_raw(&tag, &attrs);
         let el = Element { tag: tag.clone(), attrs, start_text, children: Vec::new(), closed: false, line };
         if self_closing || VOID.contains(&tag.as_str()) {
             self.push_node(Node::Element(el));
             return;
         }
         self.stack.push(el);
-        if RAW.contains(&tag.as_str()) {
+        if raw {
             // Raw text until the matching end tag, case-insensitive.
             let rest = &self.src[self.pos..];
             let lower = rest.to_ascii_lowercase();

@@ -1,6 +1,7 @@
 <template>
   <nav>
-    <a href="/" class="brand">{{ site.name }}</a>
+    <!-- An icon by Iconify name; the SVG is inlined at build time. -->
+    <a href="/" class="brand"><svg icon="lucide:crown" aria-hidden="true"></svg> {{ site.name }}</a>
     <a href="/blog/">{{ t.nav.blog }}</a>
     <a href="/about/">{{ t.nav.about }}</a>
   </nav>
@@ -9,4 +10,5 @@
 <style>
   nav { display: flex; gap: 1rem; padding: 1rem; border-bottom: 1px solid #ddd; }
   .brand { font-weight: bold; margin-right: auto; }
+  svg { vertical-align: -0.125em; }
 </style>

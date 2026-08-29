@@ -8,4 +8,21 @@
     <p class="date">{{ post.date }}</p>
     {{ post.body }}
   </article>
+
+  <!-- Structured data for the article. Not every post has tags, so the
+       loop sits inside an if; an undefined key would fail the build. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "headline": "{{ post.title }}",
+    "description": "{{ post.description }}",
+    "datePublished": "{{ post.date }}",
+    "url": "{{ site.url }}{{ post.url }}",
+    "inLanguage": "{{ lang }}",
+    "keywords": [
+      <template if="post.tags"><template each="tag in post.tags">"{{ tag }}",</template></template>
+    ]
+  }
+  </script>
 </x-base>

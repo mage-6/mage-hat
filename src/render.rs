@@ -6,13 +6,15 @@
 //!     if="expr"                   keep the element only when true
 //!     <x-name ...>                expand a component, its children fill <slot>s
 //!     <template each|if>          repeat or drop children with no wrapper
+//!     <svg icon="set:name">       an icon, inlined (icons.rs)
+//!     <script type="application/ld+json">   a JSON template (jsonld.rs)
 //!
 //! Untouched markup is written back exactly as it was read.
 
 use crate::components::Component;
 use crate::errors::{MageError, Result};
 use crate::expr::eval_str;
-use crate::htmltree::{parse, strip_attrs, Element, Node, RAW};
+use crate::htmltree::{parse, strip_attrs, Element, Node};
 use crate::values::{escape_attr, escape_text, to_text, truthy, Ctx, HtmlValue, Map, Value};
 use indexmap::{IndexMap, IndexSet};
 use regex::Regex;
@@ -25,6 +27,7 @@ static SINGLE_EXPR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)^\s*\{\{
 static EACH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)^\s*([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(.+?)\s*$").unwrap());
 static HREF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(\shref\s*=\s*)(["'])(/[^"']*)(["'])"#).unwrap());
 static BLOCK_TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{%\s*(\w+)").unwrap());
+static TAILWIND_ICON: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"icon-\[([a-z0-9-]+)--([a-z0-9-]+)\]").unwrap());
 
 pub const DIRECTIVES: &[&str] = &["each", "if"];
 const MAX_DEPTH: usize = 64;
@@ -37,6 +40,8 @@ pub enum Mode {
     Attr,
     /// Building a prop string: no escaping (escaped later on output).
     Plain,
+    /// Inside a JSON-LD script: escaped for a JSON string, quotes are the author's.
+    Json,
 }
 
 /// Per-page rendering state.
@@ -45,6 +50,10 @@ pub struct Env<'a> {
     pub root: &'a Ctx<'a>,
     pub interpolate: bool,
     pub link_map: Option<&'a HashMap<String, String>>,
+    /// Inside a JSON-LD script: text is JSON, and only <template> may appear.
+    pub json: bool,
+    /// Where icons come from. None leaves <svg icon> elements as written.
+    pub icons: Option<&'a crate::icons::Icons>,
     /// Ordered set of component tags used so far.
     pub used: IndexSet<String>,
     pub depth: usize,
@@ -52,7 +61,7 @@ pub struct Env<'a> {
 
 impl<'a> Env<'a> {
     pub fn new(components: &'a IndexMap<String, Component>, root: &'a Ctx<'a>) -> Env<'a> {
-        Env { components, root, interpolate: true, link_map: None, used: IndexSet::new(), depth: 0 }
+        Env { components, root, interpolate: true, link_map: None, json: false, icons: None, used: IndexSet::new(), depth: 0 }
     }
 }
 
@@ -62,7 +71,8 @@ pub fn render_nodes(nodes: &[Node], ctx: &Ctx, env: &mut Env, file: &str) -> Res
         match n {
             Node::Text { text, line } => {
                 if env.interpolate {
-                    out.push_str(&interpolate(text, ctx, env, Mode::Text, file, *line)?);
+                    let mode = if env.json { Mode::Json } else { Mode::Text };
+                    out.push_str(&interpolate(text, ctx, env, mode, file, *line)?);
                 } else {
                     out.push_str(text);
                 }
@@ -83,6 +93,11 @@ pub fn render_element(el: &Element, ctx: &Ctx, env: &mut Env, file: &str, strip:
         return render_plain(el, ctx, env, file, strip);
     }
     check_foreign_attrs(el, file)?;
+    if env.json && !(el.tag == "template" && (el.has_attr("each") || el.has_attr("if"))) {
+        return Err(MageError::at(format!("<{}> inside a JSON-LD script", el.tag), file, el.line)
+            .fix("a JSON-LD script holds JSON with {{ expr }} for values; the only element allowed inside is <template each=\"...\"> or <template if=\"...\">")
+            .snippet(format!("<{}", el.tag)));
+    }
     let Some(each) = el.attr("each") else {
         return render_one(el, ctx, env, file, strip);
     };
@@ -159,6 +174,9 @@ fn render_plain(el: &Element, ctx: &Ctx, env: &mut Env, file: &str, strip: &[&st
             return render_component(el, ctx, env, comp, file);
         }
     }
+    if el.tag == "svg" && el.has_attr("icon") && env.icons.is_some() {
+        return render_icon(el, ctx, env, file, strip);
+    }
     let mut start = strip_attrs(&el.start_text, strip);
     // Localize literal links before interpolation: an href computed from a
     // value (a language switcher, an item url) is already the right one.
@@ -170,7 +188,9 @@ fn render_plain(el: &Element, ctx: &Ctx, env: &mut Env, file: &str, strip: &[&st
     if env.interpolate {
         start = interpolate(&start, ctx, env, Mode::Attr, file, el.line)?;
     }
-    let inner = if RAW.contains(&el.tag.as_str()) {
+    let inner = if el.is_json_ld() && env.interpolate {
+        render_json_ld(el, ctx, env, file)?
+    } else if el.is_raw() {
         el.children
             .iter()
             .filter_map(|c| match c {
@@ -189,6 +209,49 @@ fn render_plain(el: &Element, ctx: &Ctx, env: &mut Env, file: &str, strip: &[&st
         out.push('>');
     }
     Ok(out)
+}
+
+/// The content of a JSON-LD script: rendered as a template, then checked as
+/// JSON and written compact.
+fn render_json_ld(el: &Element, ctx: &Ctx, env: &mut Env, file: &str) -> Result<String> {
+    let was_json = env.json;
+    env.json = true;
+    let text = render_nodes(&el.children, ctx, env, file);
+    env.json = was_json;
+    crate::jsonld::finish(&text?).map_err(|why| {
+        MageError::at(format!("JSON-LD is not valid JSON: {why}"), file, el.line)
+            .fix("write plain JSON with the quotes in place: \"name\": \"{{ site.name }}\"; <template each=\"...\"> repeats a piece, and a comma left before ] or } is fine")
+    })
+}
+
+/// `<svg icon="set:name" ...>`: the icon's own SVG with the element's
+/// attributes on it. See icons.rs.
+fn render_icon(el: &Element, ctx: &Ctx, env: &mut Env, file: &str, strip: &[&str]) -> Result<String> {
+    let icons = env.icons.expect("checked by the caller");
+    if el.children.iter().any(|c| !c.is_blank()) {
+        return Err(MageError::at("<svg icon> must be empty", file, el.line)
+            .fix("the icon file supplies the content; remove what is inside the element, or drop the icon attribute to write your own SVG")
+            .snippet("icon="));
+    }
+    let raw = el.attr("icon").unwrap_or("");
+    let name = if env.interpolate { interpolate(raw, ctx, env, Mode::Plain, file, el.line)? } else { raw.to_string() };
+    let svg = icons.get(name.trim()).map_err(|mut e| {
+        if e.file.is_none() {
+            e.file = Some(file.to_string());
+            e.line = Some(el.line);
+        }
+        e
+    })?;
+    let mut own: Vec<(String, String)> = Vec::new();
+    for (n, v) in &el.attrs {
+        if n == "icon" || DIRECTIVES.contains(&n.as_str()) || strip.contains(&n.as_str()) {
+            continue;
+        }
+        let v = v.as_deref().unwrap_or("");
+        let v = if env.interpolate { interpolate(v, ctx, env, Mode::Plain, file, el.line)? } else { v.to_string() };
+        own.push((n.clone(), v));
+    }
+    Ok(crate::icons::render(&svg, &own))
 }
 
 fn localize(href: &str, map: &HashMap<String, String>) -> String {
@@ -301,6 +364,7 @@ pub fn interpolate(text: &str, ctx: &Ctx, env: &mut Env, mode: Mode, file: &str,
             }
             Mode::Attr => out.push_str(&escape_attr(&value)),
             Mode::Plain => out.push_str(&to_text(&value)),
+            Mode::Json => out.push_str(&crate::jsonld::escape_string(&to_text(&value))),
         }
         last = whole.end();
     }
@@ -331,7 +395,14 @@ fn check_foreign_text(text: &str, file: &str, line: usize) -> Result<()> {
 }
 
 fn check_foreign_attrs(el: &Element, file: &str) -> Result<()> {
-    for (name, _) in &el.attrs {
+    for (name, value) in &el.attrs {
+        if name == "class" {
+            if let Some(m) = value.as_deref().and_then(|v| TAILWIND_ICON.captures(v)) {
+                return Err(MageError::at(format!("{} is Tailwind icon syntax, not MageHat", &m[0]), file, el.line)
+                    .fix(format!("write <svg icon=\"{}:{}\" aria-hidden=\"true\"></svg>; the icon is inlined at build time", &m[1], &m[2]))
+                    .snippet(m[0].to_string()));
+            }
+        }
         let fix = match name.as_str() {
             "v-for" | "x-for" | "*ngfor" | "ng-repeat" => Some("use each=\"item in list\""),
             "v-if" | "x-if" | "x-show" | "*ngif" | "ng-if" => Some("use if=\"expr\""),

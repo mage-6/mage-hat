@@ -42,7 +42,8 @@ pub fn inspect_site(root: &Path) -> Result<Json> {
             "magehat dev [--port N]": "serve dist/ locally with live reload",
             "magehat inspect --json": "this description of the site",
             "magehat clean": "remove dist/ and the image cache",
-            "magehat skill": "print the full language reference (SKILL.md)",
+            "magehat": "the list of commands",
+            "magehat -h": "print the manual, which is the complete reference",
         },
         "syntax": {
             "text": "{{ expr }} inserts a value, HTML-escaped; {{ t.key }} reads src/i18n/<lang>.json",

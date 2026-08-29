@@ -9,6 +9,15 @@
   <title>{{ page.title }} · {{ site.name }}</title>
   <meta name="description" content="{{ page.description }}">
   <link rel="stylesheet" href="/site.css">
+  <!-- Structured data: a JSON-LD script is a template like the rest. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "{{ site.name }}",
+    "url": "{{ site.url }}/"
+  }
+  </script>
 </head>
 <body>
   <x-nav></x-nav>

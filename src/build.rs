@@ -55,6 +55,8 @@ pub struct BuildResult {
     pub pages: Vec<BuiltPage>,
     pub errors: Vec<MageError>,
     pub warnings: Vec<Warning>,
+    /// Things the build did that are worth knowing (an icon downloaded).
+    pub notes: Vec<String>,
     pub components: IndexMap<String, Component>,
     pub collections: Collections,
     pub sources: Vec<PageSource>,
@@ -94,6 +96,7 @@ pub fn build_site(root: &Path) -> Result<BuildResult> {
         pages: Vec::new(),
         errors: Vec::new(),
         warnings: Vec::new(),
+        notes: Vec::new(),
         components,
         collections,
         sources,
@@ -207,10 +210,14 @@ struct Builder<'r> {
     items: IndexMap<String, IndexMap<String, Vec<Map>>>,
     link_maps: HashMap<String, HashMap<String, String>>,
     asset_map: crate::assets::AssetMap,
+    icons: crate::icons::Icons,
+    fonts: crate::fonts::Fonts,
 }
 
 impl<'r> Builder<'r> {
     fn run(result: &'r mut BuildResult) {
+        let icons = crate::icons::Icons::new(&result.cfg.root);
+        let fonts = crate::fonts::Fonts::new(&result.cfg.root);
         let mut b = Builder {
             r: result,
             trees: HashMap::new(),
@@ -219,6 +226,8 @@ impl<'r> Builder<'r> {
             items: IndexMap::new(),
             link_maps: HashMap::new(),
             asset_map: crate::assets::AssetMap::new(),
+            icons,
+            fonts,
         };
         b.find_item_pages();
         b.build_item_dicts();
@@ -232,6 +241,11 @@ impl<'r> Builder<'r> {
                 b.render_instance(inst, &root);
             }
         }
+        for fetched in b.icons.fetched.borrow().iter() {
+            b.r.notes.push(format!("downloaded icon {fetched}; commit the file"));
+        }
+        // Before the assets are copied, so font files saved now ship now.
+        b.localize_fonts();
         let asset_keys = b.copy_assets();
         b.asset_map = crate::assets::plan(b.r, &asset_keys);
         b.write_component_assets();
@@ -240,6 +254,26 @@ impl<'r> Builder<'r> {
         b.finish_pages();
         b.write_feeds();
         b.write_sitemap_and_robots();
+    }
+
+    /// Google Fonts links become local stylesheets (fonts.rs).
+    fn localize_fonts(&mut self) {
+        let pages: Vec<(String, String)> = self.r.pages.iter().map(|p| (p.out.clone(), p.file.clone())).collect();
+        for (out, file) in pages {
+            let html = String::from_utf8_lossy(&self.r.outputs[&out]).to_string();
+            if !html.contains("fonts.googleapis.com") && !html.contains("fonts.gstatic.com") {
+                continue;
+            }
+            match self.fonts.localize_page(&html, &file) {
+                Ok(html) => {
+                    self.r.outputs.insert(out, html.into_bytes());
+                }
+                Err(e) => self.r.errors.push(e),
+            }
+        }
+        for fetched in self.fonts.fetched.drain(..) {
+            self.r.notes.push(format!("downloaded {fetched}; commit the files"));
+        }
     }
 
     /// Point every page at hashed assets, then minify.
@@ -416,6 +450,7 @@ impl<'r> Builder<'r> {
                 let mut env = Env::new(&self.r.components, &root);
                 env.interpolate = false;
                 env.link_map = self.link_maps.get(lang);
+                env.icons = Some(&self.icons);
                 match render_fragment(&item.body_html, &root, &mut env, &item.file) {
                     Ok(html) => rendered.push((coll.clone(), i, html, env.used.iter().cloned().collect())),
                     Err(e) => {
@@ -524,6 +559,7 @@ impl<'r> Builder<'r> {
         let ctx = page_ctx.child(item_vars);
         let mut env = Env::new(components, &page_ctx);
         env.link_map = link_map;
+        env.icons = Some(&self.icons);
         let html = render_nodes(&tree[start..], &ctx, &mut env, &file)?;
         let html = html.trim_start().to_string();
         let lines = self.head_lines(&env.used, &inst.url, &inst.translations, &html);

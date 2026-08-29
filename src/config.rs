@@ -66,7 +66,7 @@ pub fn load_config(root: &Path) -> Result<Config> {
     let path = root.join("site.toml");
     if !path.is_file() {
         return Err(MageError::in_file("site.toml not found", "site.toml")
-            .fix("create it as shown under \"A site from nothing\" in AGENTS.md, or run `magehat init` for a sample site"));
+            .fix("create it as shown under \"A site from nothing\" in `magehat -h`, or run `magehat init` for a sample site"));
     }
     let text = std::fs::read_to_string(&path)?;
     let mut table: toml::Table = toml::from_str(&text)

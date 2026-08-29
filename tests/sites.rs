@@ -78,7 +78,7 @@ fn scaffold_builds_clean() {
     for key in ["index.html", "about/index.html", "blog/index.html", "blog/hello-world/index.html", "404.html", "sitemap.xml", "robots.txt", "site.css", "blog/feed.xml"] {
         assert!(r.outputs.contains_key(key), "missing {key}");
     }
-    assert!(site.join("AGENTS.md").is_file() && site.join(".claude/skills/magehat/SKILL.md").is_file() && site.join("CLAUDE.md").is_file());
+    assert!(!site.join("AGENTS.md").exists() && !site.join(".claude").exists(), "init writes the site and nothing else");
 }
 
 #[test]
@@ -238,11 +238,11 @@ fn new_creates_files_that_check_clean() {
     assert!(e.message.contains("already exists"));
 }
 
-/// The four files shown under "A site from nothing" in SKILL.md, verbatim.
+/// The four files shown under "A site from nothing" in MANUAL.md, verbatim.
 /// If this test fails, fix the doc or the tool; never let them drift.
 #[test]
 fn site_from_nothing_as_documented() {
-    let skill = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("SKILL.md")).unwrap();
+    let skill = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("MANUAL.md")).unwrap();
     let section = &skill[skill.find("## A site from nothing").unwrap()..skill.find("## Files").unwrap()];
     // Indented blocks, in order: site.toml, base.html, index.html. A blank
     // line stays inside a block when the next non-blank line is indented.
@@ -318,4 +318,109 @@ fn scaffold_matches_golden() {
         let want = std::fs::read(golden.join(rel)).unwrap();
         assert!(data == &want, "{rel} differs from golden:\n{}", String::from_utf8_lossy(data));
     }
+}
+
+/// A bare `magehat` lists the commands; the list is cut from MANUAL.md, so a
+/// command documented there and nowhere else still shows up.
+#[test]
+fn bare_command_lists_commands_from_the_manual() {
+    let usage = magehat::cli::usage();
+    for cmd in ["magehat check", "magehat build", "magehat dev", "magehat init", "magehat clean"] {
+        assert!(usage.contains(cmd), "{cmd} missing from:\n{usage}");
+    }
+    assert!(usage.contains("Run `magehat -h`"), "no pointer to the manual");
+    assert!(!usage.contains("## "), "the markdown heading leaked in:\n{usage}");
+}
+
+#[test]
+fn json_ld_scripts_are_templates() {
+    let site = scaffold("jsonld");
+    std::fs::write(
+        site.join("src/pages/ld.html"),
+        concat!(
+            "<title>A </b> title</title>\n<meta name=\"description\" content=\"d\">\n<x-base>\n",
+            "<script type=\"application/ld+json\">\n{ \"@type\": \"ItemList\", \"name\": \"{{ page.title }}\", \"items\": [\n",
+            "  <template each=\"post in blog\">{ \"name\": \"{{ post.title }}\", \"url\": \"{{ site.url }}{{ post.url }}\" },</template>\n",
+            "] }\n</script>\n<script>var keep = '{{ untouched }}';</script>\n</x-base>\n"
+        ),
+    )
+    .unwrap();
+    let r = build_site(&site).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    let html = text(&r, "ld/index.html");
+    assert!(html.contains(concat!(
+        "<script type=\"application/ld+json\">{\"@type\":\"ItemList\",\"name\":\"A <\\/b> title\",\"items\":[",
+        "{\"name\":\"A second post\",\"url\":\"https://example.com/blog/second-post/\"},",
+        "{\"name\":\"Hello, world\",\"url\":\"https://example.com/blog/hello-world/\"}]}</script>"
+    )), "{html}");
+    assert!(html.contains("var keep = '{{ untouched }}';"), "other scripts are untouched");
+    let post = text(&r, "blog/hello-world/index.html");
+    assert!(post.contains("\"keywords\":[\"news\",\"meta\"]") && post.contains("\"@type\":\"Article\""), "{post}");
+
+    page(&site, "ld.html", "<script type=\"application/ld+json\">{ \"name\": {{ page.title }} }</script>");
+    let r = build_site(&site).unwrap();
+    assert!(r.errors[0].message.starts_with("JSON-LD is not valid JSON"), "{}", r.errors[0]);
+    assert!(r.errors[0].fix.as_deref().unwrap().contains("quotes"));
+    assert_eq!(r.errors[0].line, Some(4));
+
+    page(&site, "ld.html", "<script type=\"application/ld+json\">{ \"name\": <b>x</b> }</script>");
+    let r = build_site(&site).unwrap();
+    assert!(r.errors[0].message.contains("<b> inside a JSON-LD script"), "{}", r.errors[0]);
+}
+
+#[test]
+fn icons_are_inlined_from_files() {
+    let site = scaffold("icons");
+    std::fs::create_dir_all(site.join("src/icons/own")).unwrap();
+    std::fs::write(
+        site.join("src/icons/own/dot.svg"),
+        "<?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1em\" height=\"1em\" viewBox=\"0 0 2 2\">\n  <circle cx=\"1\" cy=\"1\" r=\"1\"/>\n</svg>\n",
+    )
+    .unwrap();
+    page(&site, "icons.html", "<p><svg icon=\"own:dot\" class=\"i\" width=\"2em\"></svg><svg icon=\"{{ 'own:dot' }}\" aria-hidden=\"true\"></svg></p>");
+    let r = build_site(&site).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    let html = text(&r, "icons/index.html");
+    assert!(html.contains("<svg xmlns=\"http://www.w3.org/2000/svg\" height=\"1em\" viewBox=\"0 0 2 2\" class=\"i\" width=\"2em\"><circle cx=\"1\" cy=\"1\" r=\"1\"/></svg>"), "{html}");
+    assert!(html.contains("viewBox=\"0 0 2 2\" aria-hidden=\"true\"><circle"), "{html}");
+    assert!(!html.contains("icon="), "{html}");
+    assert!(text(&r, "index.html").contains("<a href=\"/\" class=\"brand\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1em\" height=\"1em\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path"), "scaffold icon from the committed file");
+    assert!(r.notes.is_empty(), "nothing downloaded: {:?}", r.notes);
+
+    page(&site, "icons.html", "<svg icon=\"Shield\"></svg>");
+    let r = build_site(&site).unwrap();
+    assert!(r.errors[0].message.contains("not an icon name"), "{}", r.errors[0]);
+    assert_eq!((r.errors[0].file.as_deref(), r.errors[0].line), (Some("src/pages/icons.html"), Some(4)));
+
+    page(&site, "icons.html", "<i class=\"icon-[lucide--shield]\"></i>");
+    let r = build_site(&site).unwrap();
+    assert!(r.errors[0].message.contains("Tailwind icon syntax") && r.errors[0].fix.as_deref().unwrap().contains("icon=\"lucide:shield\""), "{}", r.errors[0]);
+
+    page(&site, "icons.html", "<svg icon=\"own:dot\"><path/></svg>");
+    let r = build_site(&site).unwrap();
+    assert!(r.errors[0].message.contains("must be empty"), "{}", r.errors[0]);
+}
+
+#[test]
+fn google_fonts_are_served_locally() {
+    let site = scaffold("fonts");
+    // Already localized (as after a first online build), so no network here.
+    std::fs::create_dir_all(site.join("src/assets/fonts/inter")).unwrap();
+    std::fs::write(site.join("src/assets/fonts/inter/inter-400-normal-latin.woff2"), b"wOF2").unwrap();
+    std::fs::write(site.join("src/assets/fonts/inter.css"), "@font-face { font-family: 'Inter'; src: url(/fonts/inter/inter-400-normal-latin.woff2) format('woff2'); }\n").unwrap();
+    page(&site, "fonts.html", "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap\" rel=\"stylesheet\">");
+    let r = run_check(&site).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings.iter().map(|w| w.to_string()).collect::<Vec<_>>());
+    let html = text(&r, "fonts/index.html");
+    assert!(!html.contains("google") && !html.contains("gstatic") && !html.contains("preconnect"), "{html}");
+    let css_link = html.lines().find(|l| l.contains("/fonts/inter.")).expect("local stylesheet link");
+    assert!(css_link.contains("<link href=\"/fonts/inter.") && css_link.ends_with(".css\" rel=\"stylesheet\">"), "{css_link}");
+    let css = r.outputs.iter().find(|(k, _)| k.starts_with("fonts/inter.") && k.ends_with(".css")).map(|(_, v)| String::from_utf8(v.clone()).unwrap()).unwrap();
+    assert!(css.contains("url(/fonts/inter/inter-400-normal-latin.") && css.contains(".woff2)"), "font file hashed too: {css}");
+
+    std::fs::write(site.join("src/assets/site.css"), "@import url(https://fonts.googleapis.com/css2?family=Lora);\nbody { margin: 0 }\n").unwrap();
+    let r = run_check(&site).unwrap();
+    let got: Vec<String> = r.warnings.iter().map(|w| w.to_string()).collect();
+    assert!(got.iter().any(|w| w == "src/assets/site.css: stylesheet imports fonts from Google"), "{got:?}");
 }
