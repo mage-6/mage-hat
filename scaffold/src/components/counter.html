@@ -1,0 +1,21 @@
+<!-- A component with browser behaviour. The <x-counter> element stays in
+     the output, so the script can define it as a custom element. The script
+     is included only on pages that use the component. -->
+<template>
+  <button type="button">{{ label }}: <span>0</span></button>
+</template>
+
+<style>
+  button { padding: .5rem 1rem; font: inherit; cursor: pointer; }
+</style>
+
+<script>
+  customElements.define('x-counter', class extends HTMLElement {
+    connectedCallback() {
+      const out = this.querySelector('span');
+      this.querySelector('button').addEventListener('click', () => {
+        out.textContent = Number(out.textContent) + 1;
+      });
+    }
+  });
+</script>

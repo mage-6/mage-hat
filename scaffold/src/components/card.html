@@ -1,0 +1,13 @@
+<template>
+  <article class="card">
+    <h2><a href="{{ url }}">{{ title }}</a></h2>
+    <p class="date" if="date">{{ date }}</p>
+    <slot></slot>
+  </article>
+</template>
+
+<style>
+  .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+  .card h2 { margin: 0 0 .25rem; font-size: 1.25rem; }
+  .date { color: #666; font-size: .9rem; margin: 0 0 .5rem; }
+</style>

@@ -1,0 +1,10 @@
+# The only configuration file. Anything else here is available as site.<key>.
+name = "My Site"
+url = "https://example.com"
+
+# First language is the default and lives at the site root.
+# Others get a prefix: languages = ["en", "pt-BR"] puts Portuguese under /pt-br/.
+languages = ["en"]
+
+[collections.blog]
+feed = true

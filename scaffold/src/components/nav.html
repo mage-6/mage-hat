@@ -1,0 +1,12 @@
+<template>
+  <nav>
+    <a href="/" class="brand">{{ site.name }}</a>
+    <a href="/blog/">{{ t.nav.blog }}</a>
+    <a href="/about/">{{ t.nav.about }}</a>
+  </nav>
+</template>
+
+<style>
+  nav { display: flex; gap: 1rem; padding: 1rem; border-bottom: 1px solid #ddd; }
+  .brand { font-weight: bold; margin-right: auto; }
+</style>

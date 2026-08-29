@@ -1,0 +1,11 @@
+<!-- One page per item of the "blog" collection (the folder name). The item
+     is available as `post` (the name in brackets). page.title and
+     page.description come from the item's metadata unless set here. -->
+
+<x-base>
+  <article>
+    <h1>{{ post.title }}</h1>
+    <p class="date">{{ post.date }}</p>
+    {{ post.body }}
+  </article>
+</x-base>

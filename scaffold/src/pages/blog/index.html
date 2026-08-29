@@ -1,0 +1,9 @@
+<title>Blog</title>
+<meta name="description" content="All posts.">
+
+<x-base>
+  <h1>{{ t.nav.blog }}</h1>
+  <x-card each="post in blog" title="{{ post.title }}" url="{{ post.url }}" date="{{ post.date }}">
+    <p>{{ post.description }}</p>
+  </x-card>
+</x-base>

@@ -1,0 +1,28 @@
+<!-- The page layout: a component whose template is a whole document.
+     Pages wrap their content in <x-base>; it lands in the <slot>. -->
+<template>
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ page.title }} · {{ site.name }}</title>
+  <meta name="description" content="{{ page.description }}">
+  <link rel="stylesheet" href="/site.css">
+</head>
+<body>
+  <x-nav></x-nav>
+  <main>
+    <slot></slot>
+  </main>
+  <footer>
+    <p>{{ t.footer.copyright }}</p>
+  </footer>
+</body>
+</html>
+</template>
+
+<style>
+  main { max-width: 42rem; margin: 0 auto; padding: 2rem 1rem; }
+  footer { text-align: center; color: #666; padding: 2rem; }
+</style>

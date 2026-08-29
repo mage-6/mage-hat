@@ -1,0 +1,23 @@
+/* Global styles. Files in src/assets are copied to the site root as they are,
+   so this is served at /site.css. Component styles are scoped to their own
+   markup; anything that should apply everywhere belongs here. */
+
+:root {
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+  color: #222;
+}
+
+body {
+  margin: 0;
+}
+
+a {
+  color: #0645ad;
+}
+
+pre {
+  background: #f4f4f4;
+  padding: 1rem;
+  overflow-x: auto;
+}

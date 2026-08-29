@@ -1,0 +1,14 @@
+{
+  "nav": {
+    "blog": "Blog",
+    "about": "About"
+  },
+  "home": {
+    "heading": "Welcome",
+    "intro": "This site is plain HTML with a few blanks filled in at build time.",
+    "latest": "Latest posts"
+  },
+  "footer": {
+    "copyright": "Built with MageHat."
+  }
+}

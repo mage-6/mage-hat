@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>My Site</title>
+    <link>https://example.com/blog/</link>
+    <description>My Site</description>
+    <language>en</language>
+    <atom:link href="https://example.com/blog/feed.xml" rel="self" type="application/rss+xml"/>
+    <item>
+      <title>A second post</title>
+      <link>https://example.com/blog/second-post/</link>
+      <guid>https://example.com/blog/second-post/</guid>
+      <pubDate>2026-02-01</pubDate>
+      <description>Posts are ordered by date, newest first.</description>
+    </item>
+    <item>
+      <title>Hello, world</title>
+      <link>https://example.com/blog/hello-world/</link>
+      <guid>https://example.com/blog/hello-world/</guid>
+      <pubDate>2026-01-15</pubDate>
+      <description>The first post on this site.</description>
+    </item>
+  </channel>
+</rss>

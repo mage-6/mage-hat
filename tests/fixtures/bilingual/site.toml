@@ -1,0 +1,6 @@
+name = "Bi"
+url = "https://bi.example"
+languages = ["en", "pt-BR"]
+
+[collections.blog]
+feed = true
