@@ -288,7 +288,7 @@ the build. Canonical, hreflang, sitemap.xml and robots.txt are generated.
 
 ## Commands
 
-    magehat                   this list of commands
+    magehat                   this list of commands, and the installed version
     magehat -h                the manual: the complete reference
     magehat check [--json]    errors and warnings, each with its fix: undefined
                               variables, foreign syntax, unclosed tags, missing
@@ -304,7 +304,7 @@ the build. Canonical, hreflang, sitemap.xml and robots.txt are generated.
                               collections, languages, i18n keys
     magehat init [dir]        sample site with a page, layout, post and image
     magehat clean             remove dist/ and the image cache
-    magehat --version         print the version
+    magehat -V, --version     print the version on its own
 
 Workflow: `magehat inspect --json`, create files with `magehat new`, edit
 under `src/`, `magehat check`, fix what it reports, repeat. Deploy `dist/`

@@ -10,14 +10,20 @@ use std::path::{Path, PathBuf};
 const MANUAL: &str = include_str!("../MANUAL.md");
 
 fn manual() -> String {
-    MANUAL.replace("{{VERSION}}", env!("CARGO_PKG_VERSION"))
+    // Normalise the line endings first. A Windows CI checkout embeds this file
+    // with CRLF, and then every "\n...\n" match below misses silently: the
+    // released binaries printed an empty command list while a local build was
+    // fine, which is the worst way for this to be wrong.
+    MANUAL
+        .replace("\r\n", "\n")
+        .replace("{{VERSION}}", env!("CARGO_PKG_VERSION"))
 }
 
-/// A bare `magehat` prints the command list, lifted from the manual's own
-/// Commands section so the short help and the reference cannot disagree.
-pub fn usage() -> String {
-    let manual = manual();
-    let commands = manual
+/// The indented block under the manual's "## Commands" heading. Normalises line
+/// endings itself so it cannot be defeated by however the file was checked out.
+fn command_block(manual: &str) -> String {
+    manual
+        .replace("\r\n", "\n")
         .split_once("\n## Commands\n")
         .map(|(_, rest)| rest)
         .unwrap_or_default()
@@ -25,12 +31,23 @@ pub fn usage() -> String {
         .skip_while(|l| l.trim().is_empty())
         .take_while(|l| l.starts_with("    ") || l.trim().is_empty())
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("\n")
+}
+
+/// A bare `magehat` prints the installed version and the command list, the
+/// latter lifted from the manual's own Commands section so the short help and
+/// the reference cannot disagree.
+pub fn usage() -> String {
+    let commands = command_block(&manual());
+    // The version leads the line: a bare `magehat` is what people type first,
+    // and "which build is actually installed" is the question it should answer
+    // without anyone having to know a flag.
     format!(
-        "magehat: a tiny, deterministic compiler for plain HTML sites\n\n\
+        "magehat {}: a tiny, deterministic compiler for plain HTML sites\n\n\
          Usage: magehat <command> [options]\n\n\
          Commands:\n{}\n\n\
          Run `magehat -h` for the manual: install, syntax, everything.\n",
+        env!("CARGO_PKG_VERSION"),
         commands.trim_end()
     )
 }
@@ -198,5 +215,37 @@ fn run(argv: &[String]) -> Result<i32> {
             Ok(0)
         }
         other => Err(MageError::new(format!("unknown command {other:?}")).fix("run `magehat` for the commands, `magehat -h` for the manual")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn usage_shows_the_installed_version_and_the_commands() {
+        let u = usage();
+        // A bare `magehat` has to answer "which build is this?" on its own.
+        assert!(u.starts_with(&format!("magehat {}:", env!("CARGO_PKG_VERSION"))), "{u}");
+        // The command list is lifted from the manual and must not come out empty.
+        for cmd in ["magehat check", "magehat build", "magehat dev", "magehat init", "--version"] {
+            assert!(u.contains(cmd), "usage is missing {cmd}:\n{u}");
+        }
+    }
+
+    #[test]
+    fn the_command_list_survives_crlf() {
+        // A Windows CI checkout embedded MANUAL.md with CRLF, the "\n## Commands\n"
+        // match missed, and every released binary printed an empty list while a
+        // local build looked fine. Parse both forms.
+        let lf = "intro\n\n## Commands\n\n    magehat build    write dist/\n\nWorkflow: ...\n";
+        let crlf = lf.replace('\n', "\r\n");
+        assert!(command_block(lf).contains("magehat build"));
+        assert_eq!(command_block(&crlf), command_block(lf));
+    }
+
+    #[test]
+    fn the_real_manual_yields_a_command_list() {
+        assert!(!command_block(&manual()).trim().is_empty(), "the shipped manual parsed to nothing");
     }
 }
