@@ -545,3 +545,18 @@ fn asset_and_icon_folders_can_live_outside_src() {
     std::fs::write(site.join("site.toml"), format!("{toml}\n[assets]\nBrand = \"kit\"\n")).unwrap();
     assert!(build_site(&site).err().expect("expected an error").message.contains("lowercase"));
 }
+
+#[test]
+fn text_nodes_may_start_with_a_multibyte_character() {
+    // The parser used to skip one *byte* when looking for the next '<' in a run
+    // of text, which landed inside the first character and panicked whenever that
+    // character was not ASCII. Any accented word opening a paragraph did it, so
+    // every Portuguese, French or Japanese page was a build away from crashing.
+    let site = scaffold("multibyte");
+    page(&site, "acentos.html", "<p>\u{c9} importante.</p>\n<p>A\u{e7}\u{e3}o e cora\u{e7}\u{e3}o</p>\n<p>\u{65e5}\u{672c}\u{8a9e}</p>");
+    let r = build_site(&site).unwrap();
+    let out = text(&r, "acentos/index.html");
+    assert!(out.contains("<p>\u{c9} importante.</p>"), "{out}");
+    assert!(out.contains("A\u{e7}\u{e3}o e cora\u{e7}\u{e3}o"), "{out}");
+    assert!(out.contains("\u{65e5}\u{672c}\u{8a9e}"), "{out}");
+}

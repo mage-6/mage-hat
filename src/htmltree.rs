@@ -141,7 +141,11 @@ impl<'a> Parser<'a> {
         while self.pos < self.src.len() {
             let rest = &self.src[self.pos..];
             if !rest.starts_with('<') {
-                let next = rest[1..].find('<').map(|i| self.pos + 1 + i).unwrap_or(self.src.len());
+                // `rest` does not start with '<' here, so the next '<' can never be at
+                // offset 0 and there is nothing to skip. Slicing `rest[1..]` to skip it
+                // panicked whenever the text began with a multi-byte character, because
+                // byte 1 is inside that character rather than on a boundary.
+                let next = rest.find('<').map(|i| self.pos + i).unwrap_or(self.src.len());
                 let line = self.line;
                 let text = self.advance(next).to_string();
                 self.push_node(Node::Text { text, line });
