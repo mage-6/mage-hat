@@ -74,7 +74,7 @@ fn parse_args(argv: &[String]) -> Result<Args> {
                 args.lang = Some(it.next().ok_or_else(|| MageError::new("--lang needs a language code"))?.clone());
             }
             "-h" | "--help" | "help" => args.command = "help".into(),
-            "-V" | "--version" | "version" => args.command = "version".into(),
+            "-v" | "-V" | "--version" | "version" => args.command = "version".into(),
             s if s.starts_with('-') => return Err(MageError::new(format!("unknown option {s}")).fix("run `magehat` for the commands, `magehat -h` for the manual")),
             s if args.command.is_empty() => args.command = s.to_string(),
             s => args.positional.push(s.to_string()),
