@@ -18,6 +18,7 @@ pub mod frontmatter;
 pub mod htmltree;
 pub mod icons;
 pub mod images;
+pub mod indexnow;
 pub mod init;
 pub mod inspect;
 pub mod jsonld;

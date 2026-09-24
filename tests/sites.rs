@@ -560,3 +560,18 @@ fn text_nodes_may_start_with_a_multibyte_character() {
     assert!(out.contains("A\u{e7}\u{e3}o e cora\u{e7}\u{e3}o"), "{out}");
     assert!(out.contains("\u{65e5}\u{672c}\u{8a9e}"), "{out}");
 }
+
+#[test]
+fn indexnow_writes_a_key_file_derived_from_the_url() {
+    let dir = scaffold("indexnow");
+    let off = build_site(&dir).unwrap();
+    assert!(!off.outputs.keys().any(|k| k.len() == 36 && k.ends_with(".txt")), "no key file unless asked for");
+
+    let toml = std::fs::read_to_string(dir.join("site.toml")).unwrap();
+    std::fs::write(dir.join("site.toml"), format!("indexnow = true
+{toml}")).unwrap();
+    let r = build_site(&dir).unwrap();
+    assert!(r.ok());
+    let key = magehat::indexnow::key_for(&r.cfg.url);
+    assert_eq!(text(&r, &format!("{key}.txt")), key);
+}

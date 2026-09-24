@@ -703,7 +703,8 @@ impl<'r> Builder<'r> {
             self.r.outputs.insert("robots.txt".into(), robots_txt(&self.r.cfg.url).into_bytes());
         }
         if self.r.cfg.url.is_empty() {
-            self.r.warn("sitemap.xml and canonical links skipped", Some("site.toml"), Some("set url = \"https://your-domain\" in site.toml"));
+            let skipped = if self.r.cfg.indexnow { "sitemap.xml, canonical links and the IndexNow key file skipped" } else { "sitemap.xml and canonical links skipped" };
+            self.r.warn(skipped, Some("site.toml"), Some("set url = \"https://your-domain\" in site.toml"));
             return;
         }
         // A page that asks not to be indexed is left out of the sitemap too.
@@ -716,6 +717,9 @@ impl<'r> Builder<'r> {
             .map(|p| SitemapEntry { url: p.url.clone(), lastmod: p.lastmod.clone(), translations: p.translations.clone() })
             .collect();
         self.r.outputs.insert("sitemap.xml".into(), sitemap_xml(&entries, &self.r.cfg.url).into_bytes());
+        if let Some((file, key)) = crate::indexnow::key_file(&self.r.cfg) {
+            self.r.outputs.insert(file, key.into_bytes());
+        }
     }
 }
 

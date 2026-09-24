@@ -273,6 +273,19 @@ a comma a loop leaves before `]` or `}` is forgiven. The result must be
 valid JSON or the build fails and says where; it is written compact. Every
 other `<script>` and `<style>` is left exactly as written.
 
+## IndexNow
+
+    indexnow = true                 in site.toml
+
+IndexNow tells Bing, Yandex and the other participating engines that pages
+changed, so they crawl within hours instead of whenever they next pass by.
+Google does not take part; it reads the sitemap. With the setting on, the
+build writes the key file the protocol checks, `/<key>.txt`, with a key
+derived from `url`: nothing to generate, store or keep secret. After each
+production deploy, `magehat indexnow` submits every URL in the live
+sitemap. Run it where a failure cannot fail the deploy: the site is already
+up, and the engines still find changes through the sitemap, only slower.
+
 ## Languages
 
     languages = ["en", "pt-BR"]     in site.toml; the first is the default
@@ -304,6 +317,7 @@ the build. Canonical, hreflang, sitemap.xml and robots.txt are generated.
                               collections, languages, i18n keys
     magehat init [dir]        sample site with a page, layout, post and image
     magehat clean             remove dist/ and the image cache
+    magehat indexnow          after a deploy, submit the live sitemap to IndexNow
     magehat -v, -V, --version print the version on its own
 
 Workflow: `magehat inspect --json`, create files with `magehat new`, edit

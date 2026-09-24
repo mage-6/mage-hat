@@ -198,7 +198,14 @@ fn run(argv: &[String]) -> Result<i32> {
             println!("{}", serde_json::to_string_pretty(&crate::inspect::inspect_site(&root)?).unwrap());
             Ok(0)
         }
-        "clean" => {
+        "indexnow" => {
+            let root = site_root()?;
+            let cfg = crate::config::load_config(&root)?;
+            let count = crate::indexnow::submit(&cfg)?;
+            println!("Submitted {count} URLs from {}/sitemap.xml to IndexNow", cfg.url);
+            Ok(0)
+        }
+                "clean" => {
             let root = site_root()?;
             let mut removed = Vec::new();
             for dir in [root.join("dist"), root.join(".magehat")] {

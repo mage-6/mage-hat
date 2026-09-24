@@ -7,6 +7,8 @@
 //!     [collections.blog]
 //!     feed = true                       # write /blog/feed.xml
 //!
+//!     indexnow = true                   # serve an IndexNow key file; `magehat indexnow` pings
+//!
 //!     [assets]
 //!     brand = "../brand/svg"            # a folder outside src/assets, served at /brand/
 //!
@@ -33,6 +35,8 @@ pub struct Config {
     pub assets: IndexMap<String, String>,
     /// Extra icon sets: set name -> folder of SVGs, relative to the site root.
     pub icons: IndexMap<String, String>,
+    /// Serve an IndexNow key file (see indexnow.rs).
+    pub indexnow: bool,
     pub extra: toml::Table,
 }
 
@@ -116,12 +120,17 @@ pub fn load_config(root: &Path) -> Result<Config> {
     };
     let assets = folder_table(&mut table, "assets", "served at /<name>/")?;
     let icons = folder_table(&mut table, "icons", "used as icon=\"<name>:file\"")?;
+    let indexnow = match table.remove("indexnow") {
+        None => false,
+        Some(toml::Value::Boolean(b)) => b,
+        Some(_) => return Err(MageError::in_file("indexnow must be true or false", "site.toml").fix("indexnow = true")),
+    };
     let url = table.remove("url").and_then(|v| v.as_str().map(|s| s.trim_end_matches('/').to_string())).unwrap_or_default();
     let name = table
         .remove("name")
         .and_then(|v| v.as_str().map(String::from))
         .unwrap_or_else(|| root.canonicalize().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_else(|| "site".into()));
-    Ok(Config { root: root.to_path_buf(), name, url, languages, collections, assets, icons, extra: table })
+    Ok(Config { root: root.to_path_buf(), name, url, languages, collections, assets, icons, indexnow, extra: table })
 }
 
 /// `[assets]` or `[icons]`: names mapped to folders. The folders must exist,
