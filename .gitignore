@@ -2,9 +2,8 @@ target/
 dist/
 release/
 
-# .claude is shared (plan, settings, skills); scratch, worktrees and settings.local.json stay out
+# .claude is shared (settings, skills); scratch, worktrees and settings.local.json stay out
 **/.claude/*
-!**/.claude/plan.md
 !**/.claude/settings.json
 !**/.claude/skills/
 !**/.claude/commands/
