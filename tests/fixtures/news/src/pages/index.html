@@ -1,0 +1,13 @@
+<title>Home</title>
+<meta name="description" content="The latest.">
+
+<x-base>
+  <h1>Latest</h1>
+  <ul>
+    <li each="post in posts" limit="site.home_posts"><a href="{{ post.url }}">{{ post.title }}</a></li>
+  </ul>
+  <h2>Tags</h2>
+  <ul class="tags">
+    <li each="tag in terms.posts.tags"><a href="{{ tag.url }}">{{ tag.name }}</a> ({{ tag.count }})</li>
+  </ul>
+</x-base>

@@ -1,0 +1,7 @@
+<x-base>
+  <article>
+    <h1>{{ post.title }}</h1>
+    {{ post.body }}
+    <p class="tags"><template each="tag in post.terms.tags"><a href="{{ tag.url }}">{{ tag.name }}</a> </template></p>
+  </article>
+</x-base>

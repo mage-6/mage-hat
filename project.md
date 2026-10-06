@@ -8,7 +8,7 @@ links:
 ---
 
 ## Next
-- Pagination and tag or archive pages (not in v1)
+- A Google News sitemap needs "the last two days", which the clockless build cannot know; open until a site needs Google News (Discover does not)
 
 ## Decisions
 - Hard boundary: a static-site compiler, never an application framework. No server rendering, auth, databases, API routes, middleware, hydration, framework integrations, plugin system, or arbitrary code in templates. A project that needs those uses another framework
@@ -30,6 +30,8 @@ links:
 - Ready-made components are copied, not resolved from the binary: the site owns and restyles its copy; the scaffold includes them from `library/` so they cannot drift, and a test builds every entry
 - Output URLs stay root-absolute (no file:// preview); a `--portable` build is a possible later option for bundled help pages
 - Syntax highlighting is declined
+- Lists and archives are declared in page metadata (`list`, `per-page`, `by`), not in site.toml or the file name, so a page says what it is where its title is; pages live at `/page/N/` under the page's URL, archive terms at `/<page>/<slug>/` with Latin accents folded; the `pager` and term variables are build-time values, never a filter or a function
+- `limit` on `each` is the one list operator: a news home page needs the first N, and a filter syntax was the alternative
 
 ## Open questions
 - Should missing translation keys fall back to the default language instead of failing the build?

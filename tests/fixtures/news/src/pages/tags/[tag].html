@@ -1,0 +1,14 @@
+<title>{{ tag.name }}</title>
+<meta name="description" content="Posts tagged {{ tag.name }}.">
+<meta name="list" content="posts">
+<meta name="by" content="tags">
+<meta name="per-page" content="2">
+
+<x-base>
+  <h1>{{ tag.name }}</h1>
+  <p class="count">{{ tag.count }} posts</p>
+  <ul>
+    <li each="post in pager.items"><a href="{{ post.url }}">{{ post.title }}</a></li>
+  </ul>
+  <x-pager pager="{{ pager }}"></x-pager>
+</x-base>

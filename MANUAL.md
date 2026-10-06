@@ -86,6 +86,8 @@ whole document; pages land in the `<slot>`):
 
     site.toml            name, url, languages, collections
     src/pages/           one HTML file per page: about.html -> /about/
+                         blog/[post].html -> /blog/<slug>/ (see Collections)
+                         tags/[tag].html  -> /tags/<term>/ (see Lists and archives)
     src/components/      one HTML file per component: card.html -> <x-card>
     src/content/         collections only (blog posts, docs); optional
     src/i18n/en.json     UI strings, read with {{ t.key }}; optional
@@ -175,6 +177,7 @@ in one site's copy.
     {{ title }}                text, HTML-escaped ({{ post.body }} is trusted HTML)
     {{ t.nav.home }}           translation string from src/i18n/<lang>.json
     <li each="post in blog">   repeat the element per item
+    <li each=".." limit="5">   the first five only (a number or an expression)
     <p if="post.featured">     keep the element only if true
     <template each="..">       repeat or drop children with no wrapper element
     <svg icon="lucide:menu">   an icon, inlined at build time (see Icons)
@@ -186,7 +189,8 @@ compute values in metadata or `src/data`, and write a second element with
 `if="not cond"` instead of else. Printing an undefined variable is an error;
 testing one with `if` is not, and neither is `{{ page.image or site.image }}`:
 `or` is how a default is written, so a missing left side counts as false.
-Globals: `site`, `t`, `lang`, `page`, `data`, and one list per collection.
+Globals: `site`, `t`, `lang`, `page`, `data`, one list per collection, and
+`terms` when the site has archive pages.
 
 ## Collections
 
@@ -215,6 +219,51 @@ List items with `each="post in blog"`. Item pages come from
     </x-base>
 
 Set `feed = true` under `[collections.blog]` in site.toml to get `/blog/feed.xml`.
+
+## Lists and archives
+
+A page that lists a collection a page at a time declares it in its metadata:
+
+    <title>Blog, page {{ pager.number }}</title>
+    <meta name="description" content="Every post, newest first.">
+    <meta name="list" content="blog">
+    <meta name="per-page" content="20">
+
+    <x-base>
+      <ul><li each="post in pager.items">{{ post.title }}</li></ul>
+      <a if="pager.prev" href="{{ pager.prev }}">Newer</a>
+      <a if="pager.next" href="{{ pager.next }}">Older</a>
+    </x-base>
+
+`src/pages/blog/index.html` then becomes `/blog/`, `/blog/page/2/` and so on,
+one page per twenty items (ten without `per-page`). `pager` holds `items`,
+`number`, `count` (of pages), `total` (of items), `url` (the first page),
+`prev` and `next` (a URL, or null on the first and last page) and `pages`,
+a list of `{number, url, current}` for numbered links.
+
+An archive page groups the collection by one of its fields and gives every
+value its own listing. It is a bracket page, like an item page, with `by`:
+
+    src/pages/tags/[tag].html
+
+    <title>{{ tag.name }}</title>
+    <meta name="description" content="Posts tagged {{ tag.name }}.">
+    <meta name="list" content="blog">
+    <meta name="by" content="tags">
+
+The field may hold a list (`tags: [a, b]`) or one value (`author: Ana`).
+Each distinct value is a term `{name, slug, url, count}`: `/tags/elden-ring/`
+for "Elden Ring", accents folded, paginated like a list. The bracket
+variable (`tag`) is the term, `pager` the items that carry it. Two spellings
+that would share a URL are an error. Every item gets `terms.<field>` with its
+own terms in the order it lists them, for linking from the item page:
+
+    <a each="tag in post.terms.tags" href="{{ tag.url }}">{{ tag.name }}</a>
+
+and the site gets `terms.<collection>.<field>` with all of them, by count
+then name, for a tag cloud or a menu. Both exist only once the archive page
+does. The archive and list pages are in the sitemap; nothing lists the
+terms themselves, so write that page yourself from `terms.blog.tags`.
 
 ## Images and assets
 

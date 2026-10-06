@@ -1,0 +1,7 @@
+<template>
+  <nav class="pager" aria-label="Pages">
+    <a if="pager.prev" href="{{ pager.prev }}" rel="prev">Newer</a>
+    <template each="p in pager.pages"><a if="not p.current" href="{{ p.url }}">{{ p.number }}</a><b if="p.current">{{ p.number }}</b></template>
+    <a if="pager.next" href="{{ pager.next }}" rel="next">Older</a>
+  </nav>
+</template>

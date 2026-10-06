@@ -8,15 +8,35 @@
 //!                                                       "blog" collection, as `post`
 //!     src/pages/404.html             /404.html
 //!
+//! A page whose metadata starts with <meta name="list" content="blog"> lists
+//! that collection a page at a time (/blog/, /blog/page/2/, ...), and a
+//! bracket page with <meta name="by" content="tags"> as well is an archive:
+//! one listing per distinct value of that field (/tags/<slug>/), the value as
+//! the bracket variable. See build.rs for what they receive.
+//!
 //! An unsuffixed file is the default language only, so a page exists in a
 //! language exactly when a file for it exists. Item page templates ([post])
-//! are the exception: they are shared by every language unless a suffixed
-//! variant exists, because their text comes from the item.
+//! and archive pages are the exception: they are shared by every language
+//! unless a suffixed variant exists, because their text comes from the items.
 
 use crate::components::walk_files;
 use crate::config::Config;
+use crate::content::split_html_meta;
 use crate::errors::{MageError, Result};
+use crate::htmltree::parse;
+use crate::values::{to_text, Value};
 use std::path::PathBuf;
+
+pub const DEFAULT_PER_PAGE: usize = 10;
+
+/// <meta name="list"> (and "per-page", "by") at the top of a page file.
+#[derive(Debug, Clone)]
+pub struct ListSpec {
+    pub collection: String,
+    pub per_page: usize,
+    /// The item field an archive page groups by; None for a plain list.
+    pub by: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct PageSource {
@@ -27,10 +47,22 @@ pub struct PageSource {
     pub path: PathBuf,
     /// Site-relative path with forward slashes
     pub file: String,
-    /// 'post' for blog/[post].html
+    /// 'post' for blog/[post].html, 'tag' for an archive page tags/[tag].html
     pub item_var: Option<String>,
-    /// 'blog' for blog/[post].html (folder name)
+    /// 'blog' for blog/[post].html (folder name); None for an archive page
     pub collection: Option<String>,
+    /// Set when the page lists a collection (a list or an archive page)
+    pub list: Option<ListSpec>,
+}
+
+impl PageSource {
+    pub fn is_item_page(&self) -> bool {
+        self.item_var.is_some() && self.list.is_none()
+    }
+
+    pub fn is_archive(&self) -> bool {
+        self.list.as_ref().map_or(false, |l| l.by.is_some())
+    }
 }
 
 fn valid_name(s: &str) -> bool {
@@ -76,16 +108,121 @@ pub fn discover_pages(cfg: &Config) -> Result<Vec<PageSource>> {
                 return Err(MageError::in_file("the name in brackets must be a variable name", &rel).fix("for example blog/[post].html"));
             }
         }
-        let collection = if item_var.is_some() { parts.last().cloned() } else { None };
-        if item_var.is_some() && collection.is_none() {
+        let list = list_spec(&path, &rel, item_var.is_some())?;
+        let collection = if item_var.is_some() && list.is_none() { parts.last().cloned() } else { None };
+        if item_var.is_some() && list.is_none() && collection.is_none() {
             return Err(MageError::in_file("an item page must live in a folder named after its collection", &rel)
                 .fix("move it to src/pages/<collection>/[item].html, for example src/pages/blog/[post].html"));
         }
         let mut id_parts = parts.clone();
         id_parts.push(stem);
-        pages.push(PageSource { identity: id_parts.join("/"), lang, path, file: rel, item_var, collection });
+        pages.push(PageSource { identity: id_parts.join("/"), lang, path, file: rel, item_var, collection, list });
     }
     Ok(pages)
+}
+
+/// Read the list declaration from a page's leading metadata, if it has one.
+fn list_spec(path: &std::path::Path, rel: &str, bracket: bool) -> Result<Option<ListSpec>> {
+    let text = std::fs::read_to_string(path)?;
+    let (meta, _, _) = split_html_meta(&parse(&text));
+    let by = meta.get("by").map(to_text).filter(|s| !s.trim().is_empty()).map(|s| s.trim().to_string());
+    let Some(collection) = meta.get("list").map(to_text).filter(|s| !s.trim().is_empty()) else {
+        if by.is_some() {
+            return Err(MageError::in_file("<meta name=\"by\"> needs <meta name=\"list\">", rel)
+                .fix("add <meta name=\"list\" content=\"<collection>\"> to say which collection the archive groups"));
+        }
+        return Ok(None);
+    };
+    let collection = collection.trim().to_string();
+    if !collection.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err(MageError::in_file(format!("list {collection:?} is not a collection name"), rel)
+            .fix("content=\"blog\" names the folder under src/content"));
+    }
+    let per_page = match meta.get("per-page") {
+        None => DEFAULT_PER_PAGE,
+        Some(Value::Int(n)) if *n >= 1 => *n as usize,
+        Some(v) => {
+            return Err(MageError::in_file(format!("per-page must be a whole number of items, got {:?}", to_text(v)), rel)
+                .fix("<meta name=\"per-page\" content=\"20\">, or leave it out for 10"))
+        }
+    };
+    if by.is_some() && !bracket {
+        return Err(MageError::in_file("an archive page needs a bracket name so each value gets its own URL", rel)
+            .fix("rename the file to [term].html (any variable name), for example src/pages/tags/[tag].html"));
+    }
+    if by.is_none() && bracket {
+        return Err(MageError::in_file("a list page with a bracket name needs <meta name=\"by\">", rel)
+            .fix("add <meta name=\"by\" content=\"tags\"> to make one page per value, or rename the file to index.html for a single list"));
+    }
+    Ok(Some(ListSpec { collection, per_page, by }))
+}
+
+/// URL of one page of a list: the page's own URL for the first, then
+/// /page/2/ and so on under it.
+pub fn list_url(cfg: &Config, identity: &str, lang: &str, slug: Option<&str>, number: usize) -> String {
+    let base = page_url(cfg, identity, lang, slug);
+    if number <= 1 {
+        base
+    } else {
+        format!("{base}page/{number}/")
+    }
+}
+
+/// URL slug for an archive term: lowercase, Latin accents folded, anything
+/// that is not a letter or digit becomes one dash.
+pub fn term_slug(name: &str) -> String {
+    let mut out = String::new();
+    let mut dash = false;
+    for c in name.chars().flat_map(fold_accent) {
+        if c.is_alphanumeric() {
+            out.extend(c.to_lowercase());
+            dash = false;
+        } else if !dash && !out.is_empty() {
+            out.push('-');
+            dash = true;
+        }
+    }
+    out.trim_end_matches('-').to_string()
+}
+
+fn fold_accent(c: char) -> std::vec::IntoIter<char> {
+    let s = match c {
+        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' | 'ā' | 'ă' | 'ą' => "a",
+        'À' | 'Á' | 'Â' | 'Ã' | 'Ä' | 'Å' | 'Ā' | 'Ă' | 'Ą' => "A",
+        'è' | 'é' | 'ê' | 'ë' | 'ē' | 'ę' | 'ě' => "e",
+        'È' | 'É' | 'Ê' | 'Ë' | 'Ē' | 'Ę' | 'Ě' => "E",
+        'ì' | 'í' | 'î' | 'ï' | 'ī' => "i",
+        'Ì' | 'Í' | 'Î' | 'Ï' | 'Ī' => "I",
+        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' | 'ō' | 'ő' => "o",
+        'Ò' | 'Ó' | 'Ô' | 'Õ' | 'Ö' | 'Ø' | 'Ō' | 'Ő' => "O",
+        'ù' | 'ú' | 'û' | 'ü' | 'ū' | 'ů' | 'ű' => "u",
+        'Ù' | 'Ú' | 'Û' | 'Ü' | 'Ū' | 'Ů' | 'Ű' => "U",
+        'ç' | 'ć' | 'č' => "c",
+        'Ç' | 'Ć' | 'Č' => "C",
+        'ñ' | 'ń' | 'ň' => "n",
+        'Ñ' | 'Ń' | 'Ň' => "N",
+        'ý' | 'ÿ' => "y",
+        'Ý' | 'Ÿ' => "Y",
+        'š' | 'ś' | 'ş' => "s",
+        'Š' | 'Ś' | 'Ş' => "S",
+        'ž' | 'ź' | 'ż' => "z",
+        'Ž' | 'Ź' | 'Ż' => "Z",
+        'ł' => "l",
+        'Ł' => "L",
+        'ř' => "r",
+        'Ř' => "R",
+        'ď' | 'đ' => "d",
+        'Ď' | 'Đ' => "D",
+        'ť' => "t",
+        'Ť' => "T",
+        'ß' => "ss",
+        'æ' => "ae",
+        'Æ' => "AE",
+        'œ' => "oe",
+        'Œ' => "OE",
+        _ => return vec![c].into_iter(),
+    };
+    s.chars().collect::<Vec<_>>().into_iter()
 }
 
 /// URL for a page identity in a language. `slug` fills in an item page's [var].

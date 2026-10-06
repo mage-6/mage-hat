@@ -24,6 +24,9 @@ pub fn inspect_site(root: &Path) -> Result<Json> {
     let mut colls: Vec<&str> = r.collections.keys().map(String::as_str).collect();
     colls.sort();
     globals.extend(colls);
+    if r.sources.iter().any(|s| s.is_archive()) {
+        globals.push("terms");
+    }
     Ok(json!({
         "magehat": env!("CARGO_PKG_VERSION"),
         "site": {
@@ -73,15 +76,30 @@ fn pages(r: &BuildResult) -> Vec<Json> {
     let mut out: indexmap::IndexMap<String, Json> = indexmap::IndexMap::new();
     for s in &r.sources {
         let entry = out.entry(s.identity.clone()).or_insert_with(|| {
+            let kind = match &s.list {
+                Some(l) if l.by.is_some() => "archive",
+                Some(_) => "list",
+                None if s.item_var.is_some() => "items",
+                None => "page",
+            };
             let mut e = json!({
                 "id": s.identity,
-                "kind": if s.item_var.is_some() { "items" } else { "page" },
+                "kind": kind,
                 "files": [],
                 "urls": {},
             });
-            if let Some(v) = &s.item_var {
+            if let Some(l) = &s.list {
+                e["collection"] = json!(l.collection);
+                e["per_page"] = json!(l.per_page);
+                if let Some(by) = &l.by {
+                    e["by"] = json!(by);
+                }
+            } else if let Some(v) = &s.item_var {
                 e["collection"] = json!(s.collection);
                 e["item_var"] = json!(v);
+            }
+            if let (Some(v), Some(_)) = (&s.item_var, &s.list) {
+                e["term_var"] = json!(v);
             }
             e
         });
@@ -90,10 +108,20 @@ fn pages(r: &BuildResult) -> Vec<Json> {
     for p in &r.pages {
         let Some(entry) = out.get_mut(&p.identity) else { continue };
         let urls = entry["urls"].as_object_mut().unwrap();
-        if p.item_id.is_none() {
-            urls.insert(p.lang.clone(), json!(p.url));
-        } else {
-            urls.entry(p.lang.clone()).or_insert_with(|| json!([])).as_array_mut().unwrap().push(json!(p.url));
+        // One URL per language for a page; a list of them for item pages,
+        // archives and paginated lists.
+        match urls.get_mut(&p.lang) {
+            None if p.item_id.is_none() => {
+                urls.insert(p.lang.clone(), json!(p.url));
+            }
+            None => {
+                urls.insert(p.lang.clone(), json!([p.url]));
+            }
+            Some(Json::String(first)) => {
+                let first = first.clone();
+                urls.insert(p.lang.clone(), json!([first, p.url]));
+            }
+            Some(list) => list.as_array_mut().unwrap().push(json!(p.url)),
         }
     }
     out.into_values().collect()

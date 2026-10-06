@@ -1,0 +1,4 @@
+name = "News"
+url = "https://news.example"
+languages = ["en"]
+home_posts = 2

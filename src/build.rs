@@ -9,7 +9,7 @@ use crate::config::{load_config, Config};
 use crate::content::{load_collections, split_html_meta, Collections, Item};
 use crate::errors::{MageError, Result};
 use crate::htmltree::{parse, Node};
-use crate::pages::{discover_pages, output_path, page_url, resolve, PageSource};
+use crate::pages::{discover_pages, list_url, output_path, page_url, resolve, term_slug, PageSource};
 use crate::render::{interpolate, render_fragment, render_nodes, Env, Mode};
 use crate::seo::{alternate_links, inject_head, robots_txt, rss_xml, sitemap_xml, FeedItem, SitemapEntry, Translation};
 use crate::values::{to_text, Ctx, Map, Value};
@@ -198,7 +198,26 @@ struct Instance {
     translations: Vec<Translation>,
     item_id: Option<String>,
     lastmod: Option<String>,
+    /// One page of a list or archive page.
+    pager: Option<PagerPlan>,
 }
+
+/// One page of a listing, planned before bodies are rendered: the items are
+/// positions into the collection, looked up again at render time.
+struct PagerPlan {
+    collection: String,
+    indices: Vec<usize>,
+    number: usize,
+    count: usize,
+    total: usize,
+    /// The archive term's slug, None for a plain list.
+    slug: Option<String>,
+    /// The archive term, exposed under the page's bracket variable.
+    term: Option<Map>,
+}
+
+/// lang -> collection -> field -> terms, each {name, slug, url, count}
+type Terms = IndexMap<String, IndexMap<String, IndexMap<String, Vec<Map>>>>;
 
 struct Builder<'r> {
     r: &'r mut BuildResult,
@@ -208,6 +227,7 @@ struct Builder<'r> {
     item_pages: IndexMap<String, (String, String)>,
     /// lang -> collection -> item dicts (without body until bodies are rendered)
     items: IndexMap<String, IndexMap<String, Vec<Map>>>,
+    terms: Terms,
     link_maps: HashMap<String, HashMap<String, String>>,
     asset_map: crate::assets::AssetMap,
     icons: crate::icons::Icons,
@@ -224,6 +244,7 @@ impl<'r> Builder<'r> {
             used_all: IndexSet::new(),
             item_pages: IndexMap::new(),
             items: IndexMap::new(),
+            terms: IndexMap::new(),
             link_maps: HashMap::new(),
             asset_map: crate::assets::AssetMap::new(),
             icons,
@@ -231,6 +252,7 @@ impl<'r> Builder<'r> {
         };
         b.find_item_pages();
         b.build_item_dicts();
+        b.build_terms();
         let instances = b.plan_instances();
         b.build_link_maps(&instances);
         let languages = b.r.cfg.languages.clone();
@@ -290,7 +312,7 @@ impl<'r> Builder<'r> {
 
     fn find_item_pages(&mut self) {
         let sources = self.r.sources.clone();
-        for s in sources.iter().filter(|s| s.item_var.is_some()) {
+        for s in sources.iter().filter(|s| s.is_item_page()) {
             let coll = s.collection.clone().unwrap();
             let var = s.item_var.clone().unwrap();
             if !self.r.collections.contains_key(&coll) {
@@ -348,11 +370,128 @@ impl<'r> Builder<'r> {
         }
     }
 
+    /// The values an item holds for an archive field: a list field gives
+    /// each entry, a scalar gives itself, nothing gives nothing.
+    fn field_values(d: &Map, field: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let mut push = |v: &Value| {
+            let s = to_text(v).trim().to_string();
+            if !s.is_empty() && !out.contains(&s) {
+                out.push(s);
+            }
+        };
+        match d.get(field) {
+            None | Some(Value::Null) => {}
+            Some(Value::List(l)) => l.iter().for_each(&mut push),
+            Some(v) => push(v),
+        }
+        out
+    }
+
+    /// Archive pages group a collection by a field. Every distinct value
+    /// becomes a term {name, slug, url, count}; the item gets `terms.<field>`
+    /// with its own, and the site gets `terms.<collection>.<field>` with all.
+    fn build_terms(&mut self) {
+        let sources = self.r.sources.clone();
+        let cfg = self.r.cfg.clone();
+        // identity -> (collection, field), one archive page per pair
+        let mut archives: IndexMap<String, (String, String)> = IndexMap::new();
+        for s in sources.iter().filter(|s| s.is_archive()) {
+            let spec = s.list.as_ref().unwrap();
+            let field = spec.by.clone().unwrap();
+            if !self.r.collections.contains_key(&spec.collection) {
+                self.r.errors.push(MageError::in_file(format!("no collection named {:?} in src/content for this list", spec.collection), &s.file)
+                    .fix(format!("create src/content/{}/ with at least one .md or .html item, or fix the list name", spec.collection)));
+                continue;
+            }
+            if let Some((other, _)) = archives.iter().find(|(id, (c, f))| **id != s.identity && *c == spec.collection && *f == field) {
+                self.r.errors.push(MageError::in_file(format!("{} already groups {:?} by {field:?}", other, spec.collection), &s.file)
+                    .fix("a collection has one archive page per field; remove one of them"));
+                continue;
+            }
+            archives.insert(s.identity.clone(), (spec.collection.clone(), field));
+        }
+        if archives.is_empty() {
+            return;
+        }
+        if self.r.collections.contains_key("terms") {
+            self.r.errors.push(MageError::in_file("a collection named \"terms\" clashes with the terms global that archive pages define", "src/content/terms")
+                .fix("rename the collection folder"));
+        }
+        for lang in &cfg.languages {
+            let mut per_coll: IndexMap<String, IndexMap<String, Vec<Map>>> = IndexMap::new();
+            for (identity, (coll, field)) in &archives {
+                let has_page = resolve(&sources, identity, lang, &cfg).is_some();
+                // slug -> (name, count, first item file)
+                let mut groups: IndexMap<String, (String, usize, String)> = IndexMap::new();
+                for (i, d) in self.items[lang][coll].iter().enumerate() {
+                    let file = self.r.collections[coll][lang][i].file.clone();
+                    for name in Self::field_values(d, field) {
+                        let slug = term_slug(&name);
+                        if slug.is_empty() {
+                            self.r.errors.push(MageError::in_file(format!("{field} value {name:?} has no letters or digits for a URL"), &file)
+                                .fix("give the value a name with letters in it"));
+                            continue;
+                        }
+                        match groups.get_mut(&slug) {
+                            Some((first, count, _)) if *first == name => *count += 1,
+                            Some((first, _, other)) => {
+                                self.r.errors.push(MageError::in_file(format!("{field} values {name:?} and {first:?} (in {other}) would share the URL /{slug}/"), &file)
+                                    .fix("spell them the same way, or make them different enough to get different URLs"));
+                            }
+                            None => {
+                                groups.insert(slug, (name, 1, file.clone()));
+                            }
+                        }
+                    }
+                }
+                let mut terms: Vec<Map> = groups
+                    .into_iter()
+                    .map(|(slug, (name, count, _))| {
+                        let mut t = Map::new();
+                        t.insert("name".into(), Value::str(&name));
+                        t.insert("slug".into(), Value::str(&slug));
+                        t.insert("url".into(), if has_page { Value::str(list_url(&cfg, identity, lang, Some(&slug), 1)) } else { Value::Null });
+                        t.insert("count".into(), Value::Int(count as i64));
+                        t
+                    })
+                    .collect();
+                terms.sort_by(|a, b| to_text(&a["name"]).cmp(&to_text(&b["name"])));
+                terms.sort_by_key(|t| std::cmp::Reverse(match t["count"] { Value::Int(n) => n, _ => 0 }));
+                per_coll.entry(coll.clone()).or_default().insert(field.clone(), terms);
+            }
+            // Each item's own terms, per field it is grouped by.
+            for (coll, fields) in &per_coll {
+                let files: Vec<String> = self.r.collections[coll][lang].iter().map(|i| i.file.clone()).collect();
+                for (i, d) in self.items[lang][coll].iter_mut().enumerate() {
+                    if self.r.collections[coll][lang][i].meta.contains_key("terms") {
+                        self.r.errors.push(MageError::in_file("metadata key \"terms\" is reserved on items of a collection with archive pages", &files[i])
+                            .fix("rename the key"));
+                        continue;
+                    }
+                    let mut own = Map::new();
+                    for (field, terms) in fields {
+                        // In the order the item lists them, not by count.
+                        let mine: Vec<Value> = Self::field_values(d, field)
+                            .iter()
+                            .filter_map(|name| terms.iter().find(|t| to_text(&t["name"]) == *name))
+                            .cloned()
+                            .map(Value::map)
+                            .collect();
+                        own.insert(field.clone(), Value::list(mine));
+                    }
+                    d.insert("terms".into(), Value::map(own));
+                }
+            }
+            self.terms.insert(lang.clone(), per_coll);
+        }
+    }
+
     fn plan_instances(&mut self) -> Vec<Instance> {
         let mut out = Vec::new();
         let mut identities: Vec<String> = Vec::new();
         for s in &self.r.sources {
-            if s.item_var.is_none() && !identities.contains(&s.identity) {
+            if s.item_var.is_none() && s.list.is_none() && !identities.contains(&s.identity) {
                 identities.push(s.identity.clone());
             }
         }
@@ -377,6 +516,7 @@ impl<'r> Builder<'r> {
                         translations,
                         item_id: None,
                         lastmod: None,
+                        pager: None,
                     });
                 }
             }
@@ -398,11 +538,126 @@ impl<'r> Builder<'r> {
                         translations: translations_from_value(&d["translations"]),
                         item_id: d.get("id").map(to_text),
                         lastmod: d.get("date").map(to_text).filter(|s| !s.is_empty()),
+                        pager: None,
                     });
                 }
             }
         }
+        out.extend(self.plan_lists());
         out
+    }
+
+    /// List and archive pages: one instance per page of items. Translations
+    /// join the same page number (and term slug) across languages.
+    fn plan_lists(&mut self) -> Vec<Instance> {
+        let cfg = self.r.cfg.clone();
+        let mut identities: Vec<String> = Vec::new();
+        for s in self.r.sources.iter().filter(|s| s.list.is_some()) {
+            if !identities.contains(&s.identity) {
+                identities.push(s.identity.clone());
+            }
+        }
+        let mut out: Vec<Instance> = Vec::new();
+        for identity in &identities {
+            for lang in &cfg.languages {
+                let Some(src) = resolve(&self.r.sources, identity, lang, &cfg) else { continue };
+                let source = self.r.sources.iter().position(|p| std::ptr::eq(p, src)).unwrap();
+                let spec = src.list.clone().unwrap();
+                let Some(items) = self.items[lang].get(&spec.collection) else {
+                    if spec.by.is_none() {
+                        self.r.errors.push(MageError::in_file(format!("no collection named {:?} in src/content for this list", spec.collection), &src.file)
+                            .fix(format!("create src/content/{}/ with at least one .md or .html item, or fix the list name", spec.collection)));
+                    }
+                    break; // reported once; archives were reported by build_terms
+                };
+                // (slug, term, item positions) per listing: one for a list, one per term for an archive
+                let listings: Vec<(Option<String>, Option<Map>, Vec<usize>)> = match &spec.by {
+                    None => vec![(None, None, (0..items.len()).collect())],
+                    Some(field) => match self.terms.get(lang).and_then(|t| t.get(&spec.collection)).and_then(|c| c.get(field)) {
+                        Some(terms) => terms,
+                        None => continue, // build_terms reported why
+                    }
+                        .iter()
+                        .map(|t| {
+                            let name = to_text(&t["name"]);
+                            let indices = items.iter().enumerate().filter(|(_, d)| Self::field_values(d, field).contains(&name)).map(|(i, _)| i).collect();
+                            (Some(to_text(&t["slug"])), Some(t.clone()), indices)
+                        })
+                        .collect(),
+                };
+                for (slug, term, indices) in listings {
+                    let count = indices.len().div_ceil(spec.per_page).max(1);
+                    for number in 1..=count {
+                        let chunk: Vec<usize> = indices.iter().skip((number - 1) * spec.per_page).take(spec.per_page).cloned().collect();
+                        out.push(Instance {
+                            identity: identity.clone(),
+                            lang: lang.clone(),
+                            source,
+                            url: list_url(&cfg, identity, lang, slug.as_deref(), number),
+                            item: None,
+                            collection: None,
+                            item_var: src.item_var.clone(),
+                            translations: Vec::new(),
+                            item_id: slug.clone(),
+                            lastmod: None,
+                            pager: Some(PagerPlan {
+                                collection: spec.collection.clone(),
+                                indices: chunk,
+                                number,
+                                count,
+                                total: indices.len(),
+                                slug: slug.clone(),
+                                term: term.clone(),
+                            }),
+                        });
+                    }
+                }
+            }
+        }
+        // The same listing page in every language it exists in.
+        let keys: Vec<(String, Option<String>, usize, String, String)> = out
+            .iter()
+            .map(|i| {
+                let p = i.pager.as_ref().unwrap();
+                (i.identity.clone(), p.slug.clone(), p.number, i.lang.clone(), i.url.clone())
+            })
+            .collect();
+        for inst in out.iter_mut() {
+            let p = inst.pager.as_ref().unwrap();
+            inst.translations = keys
+                .iter()
+                .filter(|(id, slug, number, _, _)| *id == inst.identity && *slug == p.slug && *number == p.number)
+                .map(|(_, _, _, lang, url)| Translation { lang: lang.clone(), url: url.clone() })
+                .collect();
+        }
+        out
+    }
+
+    /// The `pager` a list page renders with: this page's items and the
+    /// links to the others.
+    fn pager_value(&self, inst: &Instance, plan: &PagerPlan) -> Value {
+        let cfg = &self.r.cfg;
+        let all = &self.items[&inst.lang][&plan.collection];
+        let items: Vec<Value> = plan.indices.iter().map(|&i| Value::map(all[i].clone())).collect();
+        let url_of = |n: usize| Value::str(list_url(cfg, &inst.identity, &inst.lang, plan.slug.as_deref(), n));
+        let mut pages = Vec::new();
+        for n in 1..=plan.count {
+            let mut p = Map::new();
+            p.insert("number".into(), Value::Int(n as i64));
+            p.insert("url".into(), url_of(n));
+            p.insert("current".into(), Value::Bool(n == plan.number));
+            pages.push(Value::map(p));
+        }
+        let mut m = Map::new();
+        m.insert("items".into(), Value::list(items));
+        m.insert("number".into(), Value::Int(plan.number as i64));
+        m.insert("count".into(), Value::Int(plan.count as i64));
+        m.insert("total".into(), Value::Int(plan.total as i64));
+        m.insert("url".into(), url_of(1));
+        m.insert("prev".into(), if plan.number > 1 { url_of(plan.number - 1) } else { Value::Null });
+        m.insert("next".into(), if plan.number < plan.count { url_of(plan.number + 1) } else { Value::Null });
+        m.insert("pages".into(), Value::list(pages));
+        Value::map(m)
     }
 
     /// Map each page's default-language URL to its URL in every other
@@ -415,7 +670,9 @@ impl<'r> Builder<'r> {
             }
             let mut m = HashMap::new();
             for inst in instances.iter().filter(|i| &i.lang == lang) {
-                let key = if inst.item.is_none() {
+                let key = if let Some(p) = &inst.pager {
+                    Some(list_url(&self.r.cfg, &inst.identity, &default, p.slug.as_deref(), p.number))
+                } else if inst.item.is_none() {
                     Some(page_url(&self.r.cfg, &inst.identity, &default, None))
                 } else {
                     inst.translations.iter().find(|t| t.lang == default).map(|t| t.url.clone())
@@ -438,6 +695,16 @@ impl<'r> Builder<'r> {
         vars.insert("data".into(), self.r.data.clone());
         for (coll, dicts) in &self.items[lang] {
             vars.insert(coll.clone(), Value::list(dicts.iter().cloned().map(Value::map).collect()));
+        }
+        if let Some(terms) = self.terms.get(lang) {
+            let by_coll: Map = terms
+                .iter()
+                .map(|(coll, fields)| {
+                    let m: Map = fields.iter().map(|(f, ts)| (f.clone(), Value::list(ts.iter().cloned().map(Value::map).collect()))).collect();
+                    (coll.clone(), Value::map(m))
+                })
+                .collect();
+            vars.insert("terms".into(), Value::map(by_coll));
         }
         Ctx::root(vars)
     }
@@ -538,6 +805,12 @@ impl<'r> Builder<'r> {
         let mut item_vars = Map::new();
         if let (Some(var), Some(item)) = (&inst.item_var, &item) {
             item_vars.insert(var.clone(), item.clone());
+        }
+        if let Some(plan) = &inst.pager {
+            item_vars.insert("pager".into(), self.pager_value(inst, plan));
+            if let (Some(var), Some(term)) = (&inst.item_var, &plan.term) {
+                item_vars.insert(var.clone(), Value::map(term.clone()));
+            }
         }
         let components = &self.r.components;
         let link_map = self.link_maps.get(&inst.lang);

@@ -45,6 +45,12 @@ fn bilingual(name: &str) -> PathBuf {
     dir
 }
 
+fn news(name: &str) -> PathBuf {
+    let dir = temp(name);
+    copy_dir(&fixture("news"), &dir);
+    dir
+}
+
 fn text(r: &BuildResult, path: &str) -> String {
     String::from_utf8(r.outputs.get(path).unwrap_or_else(|| panic!("no output {path}")).clone()).unwrap()
 }
@@ -559,6 +565,108 @@ fn text_nodes_may_start_with_a_multibyte_character() {
     assert!(out.contains("<p>\u{c9} importante.</p>"), "{out}");
     assert!(out.contains("A\u{e7}\u{e3}o e cora\u{e7}\u{e3}o"), "{out}");
     assert!(out.contains("\u{65e5}\u{672c}\u{8a9e}"), "{out}");
+}
+
+/// A list page is rendered once per page of items, an archive page once per
+/// value of its field and page, and `limit` cuts a loop short.
+#[test]
+fn lists_archives_and_limit() {
+    let site = news("news");
+    let r = run_check(&site).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings.iter().map(|w| w.to_string()).collect::<Vec<_>>());
+
+    // limit: the two newest only, from a number in site.toml
+    let home = text(&r, "index.html");
+    assert!(home.contains("second expansion") && home.contains("patch 1.20") && !home.contains("speedrun"), "{home}");
+    // terms.posts.tags: by count, then name; accents folded in the slug
+    let tags = &home[home.find("<ul class=\"tags\">").unwrap()..];
+    assert!(tags.contains(concat!(
+        "<li><a href=\"/tags/acao/\">Ação</a> (3)</li>",
+        "<li><a href=\"/tags/elden-ring/\">Elden Ring</a> (3)</li>",
+        "<li><a href=\"/tags/fromsoftware/\">FromSoftware</a> (1)</li>",
+        "<li><a href=\"/tags/hollow-knight/\">Hollow Knight</a> (1)</li>"
+    )), "{tags}");
+
+    // five posts, two per page: three pages
+    assert!(r.outputs.contains_key("posts/index.html") && r.outputs.contains_key("posts/page/2/index.html") && r.outputs.contains_key("posts/page/3/index.html"));
+    assert!(!r.outputs.contains_key("posts/page/4/index.html") && !r.outputs.contains_key("posts/page/1/index.html"));
+    let p1 = text(&r, "posts/index.html");
+    assert!(p1.contains("<title>All posts, page 1 · News</title>"), "{p1}");
+    assert!(p1.contains("<p class=\"count\">5 posts, page 1 of 3</p>"), "{p1}");
+    assert!(p1.contains("second expansion") && p1.contains("patch 1.20") && !p1.contains("speedrun"), "{p1}");
+    assert!(!p1.contains("rel=\"prev\"") && p1.contains("<a href=\"/posts/page/2/\" rel=\"next\">Older</a>"), "{p1}");
+    assert!(p1.contains("<b>1</b><a href=\"/posts/page/2/\">2</a><a href=\"/posts/page/3/\">3</a>"), "{p1}");
+    assert!(p1.contains("<link rel=\"canonical\" href=\"https://news.example/posts/\">"), "{p1}");
+    let p3 = text(&r, "posts/page/3/index.html");
+    assert!(p3.contains("no tags") && !p3.contains("Silksong"), "{p3}");
+    assert!(p3.contains("<a href=\"/posts/page/2/\" rel=\"prev\">Newer</a>") && !p3.contains("rel=\"next\""), "{p3}");
+    assert!(p3.contains("<link rel=\"canonical\" href=\"https://news.example/posts/page/3/\">"), "{p3}");
+
+    // archive: one listing per tag, paginated the same way
+    let elden = text(&r, "tags/elden-ring/index.html");
+    assert!(elden.contains("<title>Elden Ring · News</title>") && elden.contains("<p class=\"count\">3 posts</p>"), "{elden}");
+    assert!(elden.contains("second expansion") && elden.contains("patch 1.20") && !elden.contains("speedrun"), "{elden}");
+    assert!(elden.contains("<a href=\"/tags/elden-ring/page/2/\" rel=\"next\">Older</a>"), "{elden}");
+    assert!(text(&r, "tags/elden-ring/page/2/index.html").contains("speedrun"));
+    assert!(text(&r, "tags/acao/index.html").contains("<h1>Ação</h1>"));
+    assert!(!r.outputs.contains_key("tags/fromsoftware/page/2/index.html"));
+    assert!(!r.outputs.keys().any(|k| k.starts_with("tags/index")), "no page for the archive itself");
+
+    // an item links to its own terms
+    let post = text(&r, "posts/elden-ring-dlc/index.html");
+    assert!(post.contains("<a href=\"/tags/elden-ring/\">Elden Ring</a> <a href=\"/tags/fromsoftware/\">FromSoftware</a> <a href=\"/tags/acao/\">Ação</a>"), "{post}");
+    assert!(text(&r, "posts/untagged/index.html").contains("<p class=\"tags\"></p>"));
+
+    let sitemap = text(&r, "sitemap.xml");
+    assert!(sitemap.contains("<loc>https://news.example/posts/page/2/</loc>") && sitemap.contains("<loc>https://news.example/tags/acao/</loc>"), "{sitemap}");
+
+    let info = inspect_site(&site).unwrap();
+    let pages = info["pages"].as_array().unwrap();
+    let list = pages.iter().find(|p| p["id"] == "posts/index").unwrap();
+    assert_eq!(list["kind"], "list");
+    assert_eq!(list["urls"]["en"], serde_json::json!(["/posts/", "/posts/page/2/", "/posts/page/3/"]));
+    let archive = pages.iter().find(|p| p["id"] == "tags/[tag]").unwrap();
+    assert_eq!((archive["kind"].as_str(), archive["by"].as_str(), archive["term_var"].as_str()), (Some("archive"), Some("tags"), Some("tag")));
+    assert_eq!(info["syntax"]["globals"].as_array().unwrap().iter().filter(|g| *g == "terms").count(), 1);
+}
+
+#[test]
+fn list_declarations_are_checked() {
+    let site = news("news-errors");
+    let bad = |file: &str, content: &str| {
+        std::fs::write(site.join("src/pages").join(file), content).unwrap();
+        let e = build_site(&site).err().expect("expected an error");
+        std::fs::remove_file(site.join("src/pages").join(file)).unwrap();
+        e
+    };
+    let e = bad("by-alone.html", "<title>T</title>\n<meta name=\"description\" content=\"d\">\n<meta name=\"by\" content=\"tags\">\n<x-base></x-base>\n");
+    assert!(e.message.contains("needs <meta name=\"list\">"), "{e}");
+    let e = bad("no-bracket.html", "<title>T</title>\n<meta name=\"description\" content=\"d\">\n<meta name=\"list\" content=\"posts\">\n<meta name=\"by\" content=\"tags\">\n<x-base></x-base>\n");
+    assert!(e.message.contains("bracket name") && e.fix.as_deref().unwrap().contains("[term].html"), "{e}");
+    let e = bad("[x].html", "<title>T</title>\n<meta name=\"description\" content=\"d\">\n<meta name=\"list\" content=\"posts\">\n<x-base></x-base>\n");
+    assert!(e.message.contains("needs <meta name=\"by\">"), "{e}");
+    let e = bad("size.html", "<title>T</title>\n<meta name=\"description\" content=\"d\">\n<meta name=\"list\" content=\"posts\">\n<meta name=\"per-page\" content=\"many\">\n<x-base></x-base>\n");
+    assert!(e.message.contains("per-page must be a whole number"), "{e}");
+
+    std::fs::write(site.join("src/pages/nolist.html"), "<title>T</title>\n<meta name=\"description\" content=\"d\">\n<meta name=\"list\" content=\"nope\">\n<x-base></x-base>\n").unwrap();
+    let r = build_site(&site).unwrap();
+    assert_eq!(r.errors.len(), 1, "{:?}", r.errors);
+    assert!(r.errors[0].message.contains("no collection named \"nope\""), "{}", r.errors[0]);
+    std::fs::remove_file(site.join("src/pages/nolist.html")).unwrap();
+
+    page(&site, "limit.html", "<p limit=\"2\">x</p>");
+    let r = build_site(&site).unwrap();
+    assert!(r.errors[0].message.contains("limit needs each"), "{}", r.errors[0]);
+    page(&site, "limit.html", "<p each=\"p in posts\" limit=\"site.name\">x</p>");
+    let r = build_site(&site).unwrap();
+    assert!(r.errors[0].message.contains("limit must be a whole number"), "{}", r.errors[0]);
+    std::fs::remove_file(site.join("src/pages/limit.html")).unwrap();
+
+    // two spellings of one term would share a URL
+    std::fs::write(site.join("src/content/posts/dup.md"), "---\ntitle: Dup\ndate: 2026-01-01\ntags: [elden ring]\n---\nx\n").unwrap();
+    let r = build_site(&site).unwrap();
+    assert!(r.errors[0].message.contains("would share the URL /elden-ring/"), "{}", r.errors[0]);
 }
 
 #[test]

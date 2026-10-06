@@ -29,7 +29,7 @@ static HREF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(?i)(\shref\s*=\s*
 static BLOCK_TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\{%\s*(\w+)").unwrap());
 static TAILWIND_ICON: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"icon-\[([a-z0-9-]+)--([a-z0-9-]+)\]").unwrap());
 
-pub const DIRECTIVES: &[&str] = &["each", "if"];
+pub const DIRECTIVES: &[&str] = &["each", "if", "limit"];
 const MAX_DEPTH: usize = 64;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -99,6 +99,11 @@ pub fn render_element(el: &Element, ctx: &Ctx, env: &mut Env, file: &str, strip:
             .snippet(format!("<{}", el.tag)));
     }
     let Some(each) = el.attr("each") else {
+        if el.has_attr("limit") {
+            return Err(MageError::at("limit needs each on the same element", file, el.line)
+                .fix("write each=\"post in blog\" limit=\"5\" to repeat the element for the first five items")
+                .snippet("limit="));
+        }
         return render_one(el, ctx, env, file, strip);
     };
     let Some(m) = EACH.captures(each) else {
@@ -109,7 +114,7 @@ pub fn render_element(el: &Element, ctx: &Ctx, env: &mut Env, file: &str, strip:
     let var = &m[1];
     let expr = &m[2];
     let items = eval_str(expr, ctx, false, file, el.line)?;
-    let items: Vec<Value> = match &items {
+    let mut items: Vec<Value> = match &items {
         Value::List(l) => l.iter().cloned().collect(),
         Value::Map(mm) => mm.values().cloned().collect(),
         Value::Null => Vec::new(),
@@ -119,6 +124,18 @@ pub fn render_element(el: &Element, ctx: &Ctx, env: &mut Env, file: &str, strip:
                 .snippet(expr))
         }
     };
+    // limit="5": the first five only. A number, or an expression giving one.
+    if let Some(limit) = el.attr("limit") {
+        let n = match eval_str(limit, ctx, false, file, el.line)? {
+            Value::Int(n) if n >= 0 => n as usize,
+            other => {
+                return Err(MageError::at(format!("limit must be a whole number, got {:?}", to_text(&other)), file, el.line)
+                    .fix("write limit=\"5\", or limit=\"site.home_posts\" (an expression, like if=) with the number in site.toml")
+                    .snippet(limit))
+            }
+        };
+        items.truncate(n);
+    }
     let mut out = String::new();
     for item in items {
         let mut vars = Map::new();
