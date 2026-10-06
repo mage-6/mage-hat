@@ -3,21 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Not found · My Site</title>
-<meta name="description" content="This page does not exist.">
+<title>meta · My Site</title>
+<meta name="description" content="Posts tagged meta.">
 <link rel="icon" href="/favicon.8b69af3a4b.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/site.f3dbe85947.css">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="My Site">
-<meta property="og:title" content="Not found">
-<meta property="og:description" content="This page does not exist.">
-<meta property="og:url" content="https://example.com/404.html">
+<meta property="og:title" content="meta">
+<meta property="og:description" content="Posts tagged meta.">
+<meta property="og:url" content="https://example.com/tags/meta/">
 <meta property="og:image" content="https://example.com/photos/hat.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"Organization","@id":"https://example.com/#organization","name":"My Site","url":"https://example.com/","logo":"https://example.com/photos/hat.jpg"},{"@type":"WebSite","@id":"https://example.com/#website","name":"My Site","url":"https://example.com/","inLanguage":"en","publisher":{"@id":"https://example.com/#organization"}}]}</script>
 <link rel="stylesheet" href="/_mh/x-base.348204a043.css">
+<link rel="stylesheet" href="/_mh/x-card.38fb7be8ee.css">
+<link rel="stylesheet" href="/_mh/x-pager.468cb0857d.css">
 <link rel="stylesheet" href="/_mh/x-nav.a12ddfb058.css">
-<link rel="canonical" href="https://example.com/404.html">
+<link rel="canonical" href="https://example.com/tags/meta/">
 </head>
 <body>
 <x-nav>
@@ -28,8 +30,22 @@
 </nav>
 </x-nav>
 <main>
-<h1>Page not found</h1>
-<p><a href="/">Back to the home page</a></p>
+<h1>meta</h1>
+<x-card title="A second post" url="/blog/second-post/" date="2026-02-01">
+<article class="card">
+<h2><a href="/blog/second-post/">A second post</a></h2>
+<p class="date">2026-02-01</p>
+<p>Posts are ordered by date, newest first.</p>
+</article>
+</x-card><x-card title="Hello, world" url="/blog/hello-world/" date="2026-01-15">
+<article class="card">
+<h2><a href="/blog/hello-world/">Hello, world</a></h2>
+<p class="date">2026-01-15</p>
+<p>The first post on this site.</p>
+</article>
+</x-card>
+<x-pager>
+</x-pager>
 </main>
 <footer>
 <p>Built with MageHat.</p>

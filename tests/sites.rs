@@ -81,7 +81,7 @@ fn scaffold_builds_clean() {
     let r = run_check(&site).unwrap();
     assert!(r.errors.is_empty(), "{:?}", r.errors);
     assert!(r.warnings.is_empty(), "{:?}", r.warnings.iter().map(|w| w.to_string()).collect::<Vec<_>>());
-    for key in ["index.html", "about/index.html", "blog/index.html", "blog/hello-world/index.html", "404.html", "sitemap.xml", "robots.txt", "site.css", "favicon.svg", "blog/feed.xml"] {
+    for key in ["index.html", "about/index.html", "blog/index.html", "blog/hello-world/index.html", "tags/news/index.html", "tags/meta/index.html", "404.html", "sitemap.xml", "robots.txt", "site.css", "favicon.svg", "blog/feed.xml"] {
         assert!(r.outputs.contains_key(key), "missing {key}");
     }
     assert!(!site.join("AGENTS.md").exists() && !site.join(".claude").exists(), "init writes the site and nothing else");

@@ -8,7 +8,7 @@
   <x-counter label="Clicks"></x-counter>
 
   <h2>{{ t.home.latest }}</h2>
-  <x-card each="post in blog" title="{{ post.title }}" url="{{ post.url }}" date="{{ post.date }}">
+  <x-card each="post in blog" limit="3" title="{{ post.title }}" url="{{ post.url }}" date="{{ post.date }}">
     <p>{{ post.description }}</p>
   </x-card>
 </x-base>

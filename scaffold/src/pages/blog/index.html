@@ -1,9 +1,14 @@
 <title>Blog</title>
 <meta name="description" content="All posts.">
+<!-- A list page: rendered once per page of items, at /blog/, /blog/page/2/
+     and so on. `pager` holds this page's items and the links to the others. -->
+<meta name="list" content="blog">
+<meta name="per-page" content="10">
 
 <x-base>
   <h1>{{ t.nav.blog }}</h1>
-  <x-card each="post in blog" title="{{ post.title }}" url="{{ post.url }}" date="{{ post.date }}">
+  <x-card each="post in pager.items" title="{{ post.title }}" url="{{ post.url }}" date="{{ post.date }}">
     <p>{{ post.description }}</p>
   </x-card>
+  <x-pager pager="{{ pager }}"></x-pager>
 </x-base>

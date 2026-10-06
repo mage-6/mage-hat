@@ -175,3 +175,12 @@ button.ghost:hover,
 a.button.ghost:hover {
   background: var(--surface);
 }
+
+/* A list of tags or terms shown in a row, without bullets. */
+ul.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-s);
+  list-style: none;
+  padding: 0;
+}

@@ -171,6 +171,8 @@ in one site's copy.
 
     faq    accordion of questions: <details> with a CSS-only animation,
            FAQPage structured data from the same items
+    pager  newer, older and page-number links for a list or archive page
+           (see Lists and archives)
 
 ## Expressions
 
@@ -239,7 +241,8 @@ A page that lists a collection a page at a time declares it in its metadata:
 one page per twenty items (ten without `per-page`). `pager` holds `items`,
 `number`, `count` (of pages), `total` (of items), `url` (the first page),
 `prev` and `next` (a URL, or null on the first and last page) and `pages`,
-a list of `{number, url, current}` for numbered links.
+a list of `{number, url, current}` for numbered links. `magehat add pager`
+gives a ready-made `<x-pager pager="{{ pager }}">` with all of them.
 
 An archive page groups the collection by one of its fields and gives every
 value its own listing. It is a bracket page, like an item page, with `by`:

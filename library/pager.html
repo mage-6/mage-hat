@@ -1,0 +1,47 @@
+<!-- Pager for a list or archive page: newer and older links plus the page
+     numbers, from the `pager` a list page receives. Renders nothing when
+     the list fits on one page.
+
+       <x-pager pager="{{ pager }}"></x-pager>
+
+     Props
+       pager   the page's pager (<meta name="list"> gives it to the page)
+       prev    label of the link to the previous page; default "Newer"
+       next    label of the link to the next page; default "Older"
+
+     Tokens (set on x-pager, or on :root for the whole site)
+       --pager-gap             space between links
+       --pager-padding         inside each link
+       --pager-radius          corner of the current page marker
+       --pager-current-bg      background of the current page
+       --pager-current-color   text of the current page
+
+     Parts, for the site's own CSS: .pager, .pager-link, .pager-current.
+     These names do not change. -->
+<template>
+  <nav class="pager" aria-label="Pages" if="pager.count != 1">
+    <a class="pager-link" href="{{ pager.prev }}" rel="prev" if="pager.prev">{{ prev or 'Newer' }}</a>
+    <template each="p in pager.pages">
+      <a class="pager-link" href="{{ p.url }}" if="not p.current">{{ p.number }}</a>
+      <span class="pager-current" aria-current="page" if="p.current">{{ p.number }}</span>
+    </template>
+    <a class="pager-link" href="{{ pager.next }}" rel="next" if="pager.next">{{ next or 'Older' }}</a>
+  </nav>
+</template>
+
+<style>
+  .pager {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--pager-gap, 0.5rem);
+    align-items: center;
+  }
+  .pager-link, .pager-current {
+    padding: var(--pager-padding, 0.25rem 0.6rem);
+    border-radius: var(--pager-radius, 0.25rem);
+  }
+  .pager-current {
+    background: var(--pager-current-bg, currentColor);
+    color: var(--pager-current-color, Canvas);
+  }
+</style>

@@ -18,6 +18,7 @@ const SCAFFOLD: &[(&str, &str)] = &[
     // The sample site uses a ready-made component, taken from the library
     // itself so the two cannot drift.
     ("src/components/faq.html", include_str!("../library/faq.html")),
+    ("src/components/pager.html", include_str!("../library/pager.html")),
     ("src/components/nav.html", include_str!("../scaffold/src/components/nav.html")),
     ("src/content/blog/hello-world.md", include_str!("../scaffold/src/content/blog/hello-world.md")),
     ("src/content/blog/second-post.md", include_str!("../scaffold/src/content/blog/second-post.md")),
@@ -30,6 +31,7 @@ const SCAFFOLD: &[(&str, &str)] = &[
     ("src/pages/blog/[post].html", include_str!("../scaffold/src/pages/blog/[post].html")),
     ("src/pages/blog/index.html", include_str!("../scaffold/src/pages/blog/index.html")),
     ("src/pages/index.html", include_str!("../scaffold/src/pages/index.html")),
+    ("src/pages/tags/[tag].html", include_str!("../scaffold/src/pages/tags/[tag].html")),
 ];
 
 const SCAFFOLD_BINARY: &[(&str, &[u8])] = &[

@@ -19,11 +19,18 @@ pub struct Entry {
     pub file: &'static str,
 }
 
-pub const LIBRARY: &[Entry] = &[Entry {
-    name: "faq",
-    summary: "accordion of questions: <details> with a CSS-only animation, FAQPage structured data from the same items",
-    file: include_str!("../library/faq.html"),
-}];
+pub const LIBRARY: &[Entry] = &[
+    Entry {
+        name: "faq",
+        summary: "accordion of questions: <details> with a CSS-only animation, FAQPage structured data from the same items",
+        file: include_str!("../library/faq.html"),
+    },
+    Entry {
+        name: "pager",
+        summary: "newer, older and page-number links for a list or archive page, from its pager",
+        file: include_str!("../library/pager.html"),
+    },
+];
 
 pub fn entry(name: &str) -> Option<&'static Entry> {
     LIBRARY.iter().find(|e| e.name == name)

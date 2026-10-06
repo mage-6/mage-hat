@@ -1,0 +1,15 @@
+<title>{{ tag.name }}</title>
+<meta name="description" content="Posts tagged {{ tag.name }}.">
+<!-- An archive page: one listing per distinct value of the `tags` field of
+     the "blog" collection, at /tags/<slug>/. The value is `tag` (the name
+     in brackets): name, slug, url and count. -->
+<meta name="list" content="blog">
+<meta name="by" content="tags">
+
+<x-base>
+  <h1>{{ tag.name }}</h1>
+  <x-card each="post in pager.items" title="{{ post.title }}" url="{{ post.url }}" date="{{ post.date }}">
+    <p>{{ post.description }}</p>
+  </x-card>
+  <x-pager pager="{{ pager }}"></x-pager>
+</x-base>

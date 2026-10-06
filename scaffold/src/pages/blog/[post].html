@@ -7,6 +7,10 @@
     <h1>{{ post.title }}</h1>
     <p class="date">{{ post.date }}</p>
     {{ post.body }}
+    <!-- The post's tags, each linking to its archive page (src/pages/tags/[tag].html). -->
+    <ul class="tags" if="post.terms.tags">
+      <li each="tag in post.terms.tags"><a href="{{ tag.url }}">{{ tag.name }}</a></li>
+    </ul>
   </article>
 
   <!-- Structured data for the article. Not every post has tags, so the
