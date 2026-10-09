@@ -20,3 +20,11 @@ feed = true
 #   brand = "../brand/svg"     # served at /brand/
 #   [icons]
 #   brand = "../brand/svg"     # icon="brand:logo" reads ../brand/svg/logo.svg
+
+# Files that grow with the content (a cover per story, a video) live in an R2
+# bucket, not in the repository. `magehat media add photo.jpg name` uploads one
+# and <img src="media:name"> uses it; see Media in `magehat -h`:
+#   [media]
+#   url = "https://media.example.com"   # the bucket's public address
+#   bucket = "example-bucket-media"
+#   account = "<Cloudflare account id>"

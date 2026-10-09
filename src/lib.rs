@@ -25,6 +25,7 @@ pub mod jsonld;
 pub mod library;
 pub mod lint;
 pub mod markdown;
+pub mod media;
 pub mod minify;
 pub mod new;
 pub mod pages;

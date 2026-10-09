@@ -683,3 +683,83 @@ fn indexnow_writes_a_key_file_derived_from_the_url() {
     let key = magehat::indexnow::key_for(&r.cfg.url);
     assert_eq!(text(&r, &format!("{key}.txt")), key);
 }
+
+/// The error a site fails to load with, before any page is built.
+fn build_error(site: &Path) -> magehat::errors::MageError {
+    match build_site(site) {
+        Err(e) => e,
+        Ok(_) => panic!("the site built, an error was expected"),
+    }
+}
+
+/// A scaffold site with a media bucket and two records, an image and a video.
+fn media_site(name: &str) -> PathBuf {
+    let site = scaffold(name);
+    let toml = std::fs::read_to_string(site.join("site.toml")).unwrap();
+    std::fs::write(
+        site.join("site.toml"),
+        format!("{toml}\n[media]\nurl = \"https://media.example.com/\"\nbucket = \"example-bucket-media\"\naccount = \"0123456789abcdef0123456789abcdef\"\n"),
+    )
+    .unwrap();
+    std::fs::create_dir_all(site.join("src/media")).unwrap();
+    std::fs::write(
+        site.join("src/media/cover.json"),
+        r#"{"type":"image/jpeg","ext":"jpg","hash":"abcdef0123","size":10,"width":1600,"height":900,"widths":[400,800,1200,1600]}"#,
+    )
+    .unwrap();
+    std::fs::write(site.join("src/media/trailer.json"), r#"{"type":"video/mp4","ext":"mp4","hash":"ff00ff00ff","size":10}"#).unwrap();
+    site
+}
+
+#[test]
+fn media_files_are_addressed_in_the_bucket_from_their_records() {
+    let site = media_site("media");
+    page(
+        &site,
+        "m.html",
+        "<img src=\"media:cover\" alt=\"Cover\" width=\"800\">\n<a href=\"media:trailer\">trailer</a>\n<video src=\"media:trailer\" controls></video>\n<img src=\"media:cover\" alt=\"Small\" width=\"300\">",
+    );
+    let r = run_check(&site).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    let html = text(&r, "m/index.html");
+    let m = "https://media.example.com/cover.abcdef0123";
+    assert!(
+        html.contains(&format!("<picture><source type=\"image/webp\" srcset=\"{m}.400.webp 400w, {m}.800.webp 800w, {m}.1200.webp 1200w, {m}.1600.webp 1600w\" sizes=\"(max-width: 800px) 100vw, 800px\">")),
+        "{html}"
+    );
+    assert!(html.contains(&format!("<img src=\"{m}.800.jpg\" width=\"800\" height=\"450\" srcset=\"{m}.400.jpg 400w, {m}.800.jpg 800w, {m}.1200.jpg 1200w, {m}.1600.jpg 1600w\"")), "{html}");
+    // At 300px the ladder's 400 covers both 1x and the only size that is not upscaled.
+    assert!(html.contains(&format!("<img src=\"{m}.400.jpg\" width=\"300\" height=\"169\" loading=\"lazy\"")), "{html}");
+    let t = "https://media.example.com/trailer.ff00ff00ff.mp4";
+    assert!(html.contains(&format!("href=\"{t}\"")) && html.contains(&format!("<video src=\"{t}\"")), "{html}");
+    assert!(!html.contains("media:"), "{html}");
+    assert!(!r.outputs.keys().any(|k| k.starts_with("_mh/img/cover")), "nothing is encoded locally");
+    assert_eq!(build_site(&site).unwrap().outputs, r.outputs, "deterministic");
+}
+
+#[test]
+fn media_mistakes_fail_the_build_with_the_fix() {
+    let site = media_site("media-missing");
+    page(&site, "m.html", "<img src=\"media:nope\" alt=\"x\"><a href=\"media:also\">x</a><img src=\"media:trailer\" alt=\"v\">");
+    let r = build_site(&site).unwrap();
+    let msgs: Vec<String> = r.errors.iter().map(|e| e.to_string()).collect();
+    assert_eq!(msgs.iter().filter(|m| m.contains("media:nope has no record") && m.contains("magehat media add <file> nope")).count(), 1, "{msgs:?}");
+    assert!(msgs.iter().any(|m| m.contains("media:also has no record")), "{msgs:?}");
+    assert!(msgs.iter().any(|m| m.contains("media:trailer is a video/mp4 file")), "{msgs:?}");
+    assert!(msgs.iter().all(|m| m.contains("m.html")), "{msgs:?}");
+
+    let bare = scaffold("media-no-table");
+    page(&bare, "m.html", "<img src=\"media:cover\" alt=\"x\">");
+    let r = build_site(&bare).unwrap();
+    assert!(r.errors.iter().any(|e| e.message.contains("[media]") && e.fix.as_deref().unwrap_or_default().contains("site.toml")), "{:?}", r.errors);
+
+    std::fs::write(site.join("src/media/bad.json"), "{nope").unwrap();
+    let err = build_error(&site);
+    assert!(err.to_string().contains("src/media/bad.json") && err.to_string().contains("magehat media add"), "{err}");
+    std::fs::remove_file(site.join("src/media/bad.json")).unwrap();
+
+    let toml = std::fs::read_to_string(site.join("site.toml")).unwrap();
+    std::fs::write(site.join("site.toml"), toml.replace("bucket = \"example-bucket-media\"\n", "")).unwrap();
+    let err = build_error(&site);
+    assert!(err.to_string().contains("[media] needs bucket"), "{err}");
+}

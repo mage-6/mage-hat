@@ -95,6 +95,7 @@ whole document; pages land in the `<slot>`):
     src/icons/           SVG files, a folder per set: icons/lucide/x.svg -> icon="lucide:x"
     src/assets/          copied to the site root as-is: assets/site.css -> /site.css
     src/assets/fonts/    font files and their stylesheet, saved from a Google Fonts link
+    src/media/           one record per file kept in the media bucket (see Media)
 
 `magehat new page <name>`, `new component <name>` and `new item <collection> <id>`
 create correctly shaped files; prefer them over writing files from scratch.
@@ -280,6 +281,48 @@ content-hashed copy and references are rewritten to it; keep writing the
 plain path. Output HTML and CSS are minified. Encoded images are cached in
 `.magehat/cache` by content hash, the only cache there is.
 
+## Media
+
+    [media]                                  # site.toml
+    url = "https://media.example.com"        # the bucket's public address
+    bucket = "example-bucket-media"
+    account = "<Cloudflare account id>"
+
+    magehat media add photos/cover.jpg car-park-capital
+    <img src="media:car-park-capital" alt="A car park" width="800">
+
+Files that arrive with the content, a cover per story, a trailer, would grow
+the repository and the deploy without end. `[media]` names an R2 bucket
+served at its own address, and `magehat media add` puts a file there: an
+image is encoded the way the build treats a `src/assets` image (WebP and the
+original format, at widths 400, 800, 1200, 1600, 2000 and 2400 up to the
+source, then the source itself), every variant is uploaded under a
+content-hashed name, and `src/media/<name>.json` is written with what the
+build needs: type, hash, size, width, height, widths. Commit the record; the
+original never enters the repository. Any other file (video, audio, a PDF)
+is uploaded as it is. The name defaults to the file's stem, lowercased;
+give one when the stem is generic ("cover"). A name already taken by a
+different file is an error: delete the record to replace it.
+
+`media:<name>` then works wherever a path does. An `<img>` becomes the same
+`<picture>` a local image gets, with absolute addresses and a `srcset` of
+every width up to twice the display width. In `href`, `content`, `poster`,
+a `<video>` or `<source>` src, a feed or a JSON-LD string it becomes the
+file's address (for an image, the full-size original format). A name with no
+record fails the build and names the command that writes one. The build
+reads only the records, so it stays offline and deterministic.
+
+Uploads go through the Cloudflare API with `CLOUDFLARE_API_TOKEN` from the
+environment; a token with R2 edit rights on the account, the one wrangler
+deploys with, is enough. Objects never change (the hash is in the name), so
+the bucket's cache can keep them for a year, which the upload asks for.
+
+`magehat media prune` lists the bucket and deletes every object no record
+names, except objects younger than 14 days: a story on a branch has uploaded
+its cover before its record is merged. Run it after each deploy, with
+`--dry-run` to see what would go. An object a record names but the bucket
+lacks is reported; `media add` the original again under the same name.
+
 ## Icons
 
     <svg icon="lucide:shield" aria-hidden="true"></svg>
@@ -370,6 +413,11 @@ the build. Canonical, hreflang, sitemap.xml and robots.txt are generated.
     magehat init [dir]        sample site with a page, layout, post and image
     magehat clean             remove dist/ and the image cache
     magehat indexnow          after a deploy, submit the live sitemap to IndexNow
+    magehat media add <file> [name]
+                              encode and upload a cover or a video to the media
+                              bucket and write its record under src/media/
+    magehat media prune [--dry-run]
+                              after a deploy, delete bucket objects no record names
     magehat -v, -V, --version print the version on its own
 
 Workflow: `magehat inspect --json`, create files with `magehat new`, edit

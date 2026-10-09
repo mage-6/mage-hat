@@ -58,14 +58,16 @@ struct Args {
     json: bool,
     port: u16,
     lang: Option<String>,
+    dry_run: bool,
 }
 
 fn parse_args(argv: &[String]) -> Result<Args> {
-    let mut args = Args { command: String::new(), positional: Vec::new(), json: false, port: 8080, lang: None };
+    let mut args = Args { command: String::new(), positional: Vec::new(), json: false, port: 8080, lang: None, dry_run: false };
     let mut it = argv.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--json" => args.json = true,
+            "--dry-run" => args.dry_run = true,
             "--port" => {
                 let v = it.next().ok_or_else(|| MageError::new("--port needs a number"))?;
                 args.port = v.parse().map_err(|_| MageError::new(format!("--port needs a number, got {v:?}")))?;
@@ -205,7 +207,23 @@ fn run(argv: &[String]) -> Result<i32> {
             println!("Submitted {count} URLs from {}/sitemap.xml to IndexNow", cfg.url);
             Ok(0)
         }
-                "clean" => {
+        "media" => {
+            let root = site_root()?;
+            let usage = "magehat media add <file> [name], or magehat media prune [--dry-run]";
+            match args.positional.first().map(String::as_str) {
+                Some("add") => {
+                    let file = args.positional.get(1).ok_or_else(|| MageError::new("media add needs the file to upload").fix(usage))?;
+                    println!("{}", crate::media::add(&root, file, args.positional.get(2).map(String::as_str))?);
+                    Ok(0)
+                }
+                Some("prune") => {
+                    println!("{}", crate::media::prune(&root, args.dry_run)?);
+                    Ok(0)
+                }
+                _ => Err(MageError::new("media needs add or prune").fix(usage)),
+            }
+        }
+        "clean" => {
             let root = site_root()?;
             let mut removed = Vec::new();
             for dir in [root.join("dist"), root.join(".magehat")] {

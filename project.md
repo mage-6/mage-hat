@@ -32,6 +32,10 @@ links:
 - Syntax highlighting is declined
 - Lists and archives are declared in page metadata (`list`, `per-page`, `by`), not in site.toml or the file name, so a page says what it is where its title is; pages live at `/page/N/` under the page's URL, archive terms at `/<page>/<slug>/` with Latin accents folded; the `pager` and term variables are build-time values, never a filter or a function
 - `limit` on `each` is the one list operator: a news home page needs the first N, and a filter syntax was the alternative
+- Media (`[media]`, `magehat media add`, `media:<name>`) is the one piece that talks to a bucket, and only from a command, never from the build: the build reads committed records (`src/media/<name>.json`) and stays offline. Same shape as fonts and icons: network once, commit the result. Opt-in per site, because a landing page with a dozen fixed images gains nothing from a bucket; a site whose images grow with its content (a cover per story) turns it on
+- The media bucket is spoken to through the Cloudflare API's object endpoints with the account's API token (what wrangler uses), not S3: no second credential to create, store or rotate
+- Image variants for media are a fixed ladder (400, 800, 1200, 1600, 2000, 2400, then the source width) encoded at upload, since the build cannot encode a file it does not have; a record written today still matches a build made in two years
+- `media prune` keeps objects younger than 14 days whatever the records say: a story on an open branch has uploaded its cover before its record is merged, and a deploy of the main branch must not delete it
 
 ## Open questions
 - Should missing translation keys fall back to the default language instead of failing the build?

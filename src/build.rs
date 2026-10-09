@@ -62,6 +62,8 @@ pub struct BuildResult {
     pub sources: Vec<PageSource>,
     pub i18n: IndexMap<String, Value>,
     pub data: Value,
+    /// The records of files kept in the media bucket (media.rs).
+    pub media: crate::media::Library,
 }
 
 impl BuildResult {
@@ -90,6 +92,7 @@ pub fn build_site(root: &Path) -> Result<BuildResult> {
     let data = load_data(&cfg)?;
     let collections = load_collections(&cfg)?;
     let sources = discover_pages(&cfg)?;
+    let media = crate::media::load(root)?;
     let mut result = BuildResult {
         cfg,
         outputs: BTreeMap::new(),
@@ -102,6 +105,7 @@ pub fn build_site(root: &Path) -> Result<BuildResult> {
         sources,
         i18n,
         data,
+        media,
     };
     Builder::run(&mut result);
     Ok(result)
@@ -276,6 +280,33 @@ impl<'r> Builder<'r> {
         b.finish_pages();
         b.write_feeds();
         b.write_sitemap_and_robots();
+        // Last, so a reference in a feed or in structured data is covered too.
+        b.rewrite_media_refs();
+    }
+
+    /// `media:<name>` in a link, a meta tag, a feed or a JSON-LD string becomes
+    /// the file's address in the bucket (media.rs). An `<img>` was already
+    /// handled by images.rs; what is left here is every other place a path goes.
+    fn rewrite_media_refs(&mut self) {
+        let keys: Vec<String> = self.r.outputs.keys().filter(|k| k.ends_with(".html") || k.ends_with(".xml")).cloned().collect();
+        let media = self.r.cfg.media.clone();
+        for key in keys {
+            let text = String::from_utf8_lossy(&self.r.outputs[&key]).to_string();
+            if !text.contains(crate::media::PREFIX) {
+                continue;
+            }
+            let (out, unknown) = crate::media::rewrite_refs(&text, media.as_ref(), &self.r.media);
+            let file = self.r.pages.iter().find(|p| p.out == key).map(|p| p.file.clone()).unwrap_or_else(|| key.clone());
+            for name in unknown {
+                // An <img> that images.rs could not resolve is still here with its
+                // media: src; it has reported the name once already.
+                let e = crate::media::unknown_error(&name, media.as_ref(), &file);
+                if !self.r.errors.contains(&e) {
+                    self.r.errors.push(e);
+                }
+            }
+            self.r.outputs.insert(key, out.into_bytes());
+        }
     }
 
     /// Google Fonts links become local stylesheets (fonts.rs).

@@ -15,6 +15,11 @@
 //!     [icons]
 //!     brand = "../brand/svg"            # a folder outside src/icons, used as icon="brand:x"
 //!
+//!     [media]                           # covers and videos live in an R2 bucket (media.rs)
+//!     url = "https://media.example.com"
+//!     bucket = "example-bucket-media"
+//!     account = "<Cloudflare account id>"
+//!
 //! Any other top-level key is exposed to templates as site.<key>.
 
 use crate::errors::{MageError, Result};
@@ -37,6 +42,8 @@ pub struct Config {
     pub icons: IndexMap<String, String>,
     /// Serve an IndexNow key file (see indexnow.rs).
     pub indexnow: bool,
+    /// The bucket that holds `media:` files (see media.rs).
+    pub media: Option<crate::media::Media>,
     pub extra: toml::Table,
 }
 
@@ -125,12 +132,39 @@ pub fn load_config(root: &Path) -> Result<Config> {
         Some(toml::Value::Boolean(b)) => b,
         Some(_) => return Err(MageError::in_file("indexnow must be true or false", "site.toml").fix("indexnow = true")),
     };
+    let media = media_table(&mut table)?;
     let url = table.remove("url").and_then(|v| v.as_str().map(|s| s.trim_end_matches('/').to_string())).unwrap_or_default();
     let name = table
         .remove("name")
         .and_then(|v| v.as_str().map(String::from))
         .unwrap_or_else(|| root.canonicalize().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_else(|| "site".into()));
-    Ok(Config { root: root.to_path_buf(), name, url, languages, collections, assets, icons, indexnow, extra: table })
+    Ok(Config { root: root.to_path_buf(), name, url, languages, collections, assets, icons, indexnow, media, extra: table })
+}
+
+/// `[media]`: url, bucket and account, all three or none. A half-filled table
+/// fails here, so a `media:` reference never builds against a missing piece.
+fn media_table(table: &mut toml::Table) -> Result<Option<crate::media::Media>> {
+    let Some(value) = table.remove("media") else { return Ok(None) };
+    let example = "[media]\nurl = \"https://media.example.com\"\nbucket = \"example-bucket-media\"\naccount = \"<Cloudflare account id>\"";
+    let toml::Value::Table(t) = value else {
+        return Err(MageError::in_file("[media] must be a table with url, bucket and account", "site.toml").fix(example));
+    };
+    let field = |key: &str| -> Result<String> {
+        match t.get(key).and_then(|v| v.as_str()).map(str::trim) {
+            Some(s) if !s.is_empty() => Ok(s.to_string()),
+            _ => Err(MageError::in_file(format!("[media] needs {key} in quotes"), "site.toml").fix(example)),
+        }
+    };
+    let url = field("url")?;
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err(MageError::in_file("[media] url must be the bucket's public address, starting with https://", "site.toml").fix(example));
+    }
+    for key in t.keys() {
+        if !["url", "bucket", "account"].contains(&key.as_str()) {
+            return Err(MageError::in_file(format!("[media] has no setting named {key:?}"), "site.toml").fix(example));
+        }
+    }
+    Ok(Some(crate::media::Media { url: url.trim_end_matches('/').to_string(), bucket: field("bucket")?, account: field("account")? }))
 }
 
 /// `[assets]` or `[icons]`: names mapped to folders. The folders must exist,

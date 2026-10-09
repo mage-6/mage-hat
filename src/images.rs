@@ -2,6 +2,7 @@
 //!
 //!     <img src="/photos/hat.jpg" alt="A hat">
 //!     <img src="/photos/hat.jpg" alt="A hat" width="800">
+//!     <img src="media:cover" alt="A hat" width="800">
 //!
 //! Any <img> whose src is a JPEG, PNG or WebP under src/assets gets its
 //! width and height filled in (no layout shift), loading="lazy" and
@@ -10,6 +11,10 @@
 //! srcset. Variants are cached in .magehat/cache by content hash, so an
 //! unchanged image is never encoded twice. An <img> already inside a
 //! <picture> is left alone.
+//!
+//! A `media:` image (media.rs) gets the same markup from its record alone:
+//! the variants were encoded by `magehat media add` and live in the bucket,
+//! so the build writes their addresses and never touches the file.
 
 use crate::build::BuildResult;
 use crate::components::digest_bytes;
@@ -26,15 +31,15 @@ static IMG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<img\b[^>]*>").
 
 pub const OUT_DIR: &str = "_mh/img";
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Fmt {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fmt {
     Jpeg,
     Png,
     Webp,
 }
 
 impl Fmt {
-    fn from_key(key: &str) -> Option<Fmt> {
+    pub fn from_key(key: &str) -> Option<Fmt> {
         match key.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).as_deref() {
             Some("jpg") | Some("jpeg") => Some(Fmt::Jpeg),
             Some("png") => Some(Fmt::Png),
@@ -43,7 +48,7 @@ impl Fmt {
         }
     }
 
-    fn ext(self) -> &'static str {
+    pub fn ext(self) -> &'static str {
         match self {
             Fmt::Jpeg => "jpg",
             Fmt::Png => "png",
@@ -53,7 +58,6 @@ impl Fmt {
 }
 
 struct Source {
-    key: String,
     bytes: Vec<u8>,
     hash: String,
     width: u32,
@@ -62,8 +66,10 @@ struct Source {
     decoded: Option<DynamicImage>,
 }
 
+/// One encoded size of an image: the address to write and its pixel width.
+#[derive(Clone)]
 struct Variant {
-    out: String,
+    url: String,
     width: u32,
 }
 
@@ -109,45 +115,21 @@ impl<'a> Images<'a> {
         let (_, attrs, _) = scan_start_tag(tag)?;
         let attr = |name: &str| attrs.iter().find(|(k, _)| k == name).and_then(|(_, v)| v.clone());
         let src = attr("src")?;
-        let key = resolve_key(page_out, &src)?;
-        let source = self.source(&key)?;
-        let (src_w, src_h, fmt, hash) = (source.width, source.height, source.fmt, source.hash.clone());
         let requested: Option<u32> = attr("width").and_then(|w| w.trim().parse().ok()).filter(|w| *w > 0);
+        let (src_w, src_h, fmt, webp, fallback) = match src.trim().strip_prefix(crate::media::PREFIX) {
+            Some(name) => self.media_variants(name, requested, file)?,
+            None => self.local_variants(&resolve_key(page_out, &src)?, requested, file)?,
+        };
         let display_w = requested.map_or(src_w, |w| w.min(src_w));
         let display_h = ((display_w as u64 * src_h as u64 + src_w as u64 / 2) / src_w as u64).max(1) as u32;
 
-        // Candidate widths: 1x and 2x of the display width, never above the source.
-        let mut widths = vec![display_w];
-        if display_w * 2 <= src_w {
-            widths.push(display_w * 2);
-        } else if display_w < src_w {
-            widths.push(src_w);
-        }
-
-        let stem = key.rsplit('/').next().unwrap_or(&key).rsplit_once('.').map(|(s, _)| s.to_string()).unwrap_or(key.clone());
-        let mut webp: Vec<Variant> = Vec::new();
-        let mut fallback: Vec<Variant> = Vec::new();
-        for &w in &widths {
-            match self.variant(&key, &stem, &hash, w, Fmt::Webp, file) {
-                Some(v) => webp.push(v),
-                None => return None,
-            }
-            if fmt != Fmt::Webp {
-                match self.variant(&key, &stem, &hash, w, fmt, file) {
-                    Some(v) => fallback.push(v),
-                    None => return None,
-                }
-            }
-        }
-        if fmt == Fmt::Webp {
-            fallback = webp.iter().map(|v| Variant { out: v.out.clone(), width: v.width }).collect();
-        }
-
         let sizes = requested.map(|_| format!("(max-width: {display_w}px) 100vw, {display_w}px"));
-        let srcset = |vs: &[Variant]| vs.iter().map(|v| format!("/{} {}w", v.out, v.width)).collect::<Vec<_>>().join(", ");
+        let srcset = |vs: &[Variant]| vs.iter().map(|v| format!("{} {}w", v.url, v.width)).collect::<Vec<_>>().join(", ");
+        // The plain src is the smallest variant that is not upscaled on display.
+        let main = fallback.iter().find(|v| v.width >= display_w).or(fallback.last())?;
         let rest = strip_attrs(tag, &["src", "srcset", "sizes", "width", "height"]);
         let rest = rest.trim_start_matches("<img").trim_end_matches('>').trim_end_matches('/').trim_end();
-        let mut img = format!("<img src=\"/{}\" width=\"{display_w}\" height=\"{display_h}\"", fallback[0].out);
+        let mut img = format!("<img src=\"{}\" width=\"{display_w}\" height=\"{display_h}\"", main.url);
         if fallback.len() > 1 {
             img.push_str(&format!(" srcset=\"{}\"", srcset(&fallback)));
             if let Some(s) = &sizes {
@@ -175,6 +157,72 @@ impl<'a> Images<'a> {
         Some(format!("<picture>{source}{img}</picture>"))
     }
 
+    /// Variants of an image under src/assets: 1x and 2x of the display width,
+    /// encoded now. Returns (source width, source height, format, webp, fallback).
+    fn local_variants(&mut self, key: &str, requested: Option<u32>, file: &str) -> Option<(u32, u32, Fmt, Vec<Variant>, Vec<Variant>)> {
+        let source = self.source(key)?;
+        let (src_w, src_h, fmt, hash) = (source.width, source.height, source.fmt, source.hash.clone());
+        let display_w = requested.map_or(src_w, |w| w.min(src_w));
+
+        // Candidate widths: 1x and 2x of the display width, never above the source.
+        let mut widths = vec![display_w];
+        if display_w * 2 <= src_w {
+            widths.push(display_w * 2);
+        } else if display_w < src_w {
+            widths.push(src_w);
+        }
+
+        let stem = key.rsplit('/').next().unwrap_or(key).rsplit_once('.').map(|(s, _)| s.to_string()).unwrap_or(key.to_string());
+        let mut webp: Vec<Variant> = Vec::new();
+        let mut fallback: Vec<Variant> = Vec::new();
+        for &w in &widths {
+            webp.push(self.variant(key, &stem, &hash, w, Fmt::Webp, file)?);
+            if fmt != Fmt::Webp {
+                fallback.push(self.variant(key, &stem, &hash, w, fmt, file)?);
+            }
+        }
+        if fmt == Fmt::Webp {
+            fallback = webp.clone();
+        }
+        Some((src_w, src_h, fmt, webp, fallback))
+    }
+
+    /// Variants of a `media:` image, from its record: the ladder up to twice
+    /// the display width, addressed in the bucket.
+    fn media_variants(&mut self, name: &str, requested: Option<u32>, file: &str) -> Option<(u32, u32, Fmt, Vec<Variant>, Vec<Variant>)> {
+        let media = self.r.cfg.media.clone();
+        let rec = match (&media, self.r.media.get(name).cloned()) {
+            (Some(_), Some(rec)) => rec,
+            _ => {
+                self.r.errors.push(crate::media::unknown_error(name, media.as_ref(), file));
+                return None;
+            }
+        };
+        let media = media?;
+        let (Some(src_w), Some(src_h), Some(fmt)) = (rec.width, rec.height, Fmt::from_key(&format!("x.{}", rec.ext)).filter(|_| rec.is_image())) else {
+            self.r.errors.push(
+                crate::errors::MageError::in_file(format!("media:{name} is a {} file, not an image an <img> can show", rec.mime), file)
+                    .fix("link to it, or put it in <video>, <audio> or <source> instead"),
+            );
+            return None;
+        };
+        let display_w = requested.map_or(src_w, |w| w.min(src_w));
+        let mut widths: Vec<u32> = rec.widths.iter().copied().filter(|w| *w <= display_w * 2).collect();
+        // Always one size that is not upscaled on display.
+        if let Some(up) = rec.widths.iter().copied().find(|w| *w >= display_w) {
+            if !widths.contains(&up) {
+                widths.push(up);
+            }
+        }
+        if widths.is_empty() {
+            widths.push(rec.widths[0]);
+        }
+        let make = |ext: &str| widths.iter().map(|&w| Variant { url: media.url_for(&rec.variant_key(name, w, ext)), width: w }).collect::<Vec<_>>();
+        let webp = make("webp");
+        let fallback = if fmt == Fmt::Webp { webp.clone() } else { make(fmt.ext()) };
+        Some((src_w, src_h, fmt, webp, fallback))
+    }
+
     fn source(&mut self, key: &str) -> Option<&mut Source> {
         if !self.sources.contains_key(key) {
             let loaded = self.load_source(key);
@@ -190,14 +238,15 @@ impl<'a> Images<'a> {
         if width == 0 || height == 0 {
             return None;
         }
-        Some(Source { key: key.to_string(), bytes: bytes.clone(), hash: digest_bytes(&bytes), width, height, fmt, decoded: None })
+        Some(Source { hash: digest_bytes(&bytes), bytes, width, height, fmt, decoded: None })
     }
 
     /// Produce (or fetch from cache) one encoded variant and register it as an output.
     fn variant(&mut self, key: &str, stem: &str, hash: &str, width: u32, fmt: Fmt, file: &str) -> Option<Variant> {
         let out = format!("{OUT_DIR}/{stem}.{hash}.{width}.{}", fmt.ext());
+        let url = format!("/{out}");
         if self.r.outputs.contains_key(&out) {
-            return Some(Variant { out, width });
+            return Some(Variant { url, width });
         }
         let cache_path = self.cache_dir.join(format!("{hash}.{width}.{}", fmt.ext()));
         let bytes = match std::fs::read(&cache_path) {
@@ -215,45 +264,52 @@ impl<'a> Images<'a> {
                 encoded
             }
         };
-        self.r.outputs.insert(out.clone(), bytes);
-        Some(Variant { out, width })
+        self.r.outputs.insert(out, bytes);
+        Some(Variant { url, width })
     }
 
     fn encode(&mut self, key: &str, width: u32, fmt: Fmt) -> std::result::Result<Vec<u8>, String> {
         let source = self.sources.get_mut(key).and_then(|s| s.as_mut()).ok_or("no source")?;
-        if width >= source.width && fmt == source.fmt {
-            // The original at its own size and format: re-encoding could only lose quality or grow it.
-            return Ok(source.bytes.clone());
-        }
-        if source.decoded.is_none() {
-            let img = ImageReader::new(Cursor::new(&source.bytes)).with_guessed_format().map_err(|e| e.to_string())?.decode().map_err(|e| e.to_string())?;
-            source.decoded = Some(img);
-        }
-        let full = source.decoded.as_ref().unwrap();
-        let resized;
-        let img: &DynamicImage = if width < source.width {
-            resized = full.resize(width, u32::MAX, FilterType::Lanczos3);
-            &resized
-        } else {
-            full
-        };
-        let mut buf = Cursor::new(Vec::new());
-        match fmt {
-            Fmt::Webp => {
-                let rgba = img.to_rgba8();
-                let encoder = webp::Encoder::from_rgba(&rgba, rgba.width(), rgba.height());
-                return Ok(encoder.encode(80.0).to_vec());
-            }
-            Fmt::Jpeg => {
-                let rgb = DynamicImage::ImageRgb8(img.to_rgb8());
-                let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 82);
-                rgb.write_with_encoder(encoder).map_err(|e| e.to_string())?;
-            }
-            Fmt::Png => img.write_to(&mut buf, ImageFormat::Png).map_err(|e| e.to_string())?,
-        }
-        let _ = &source.key;
-        Ok(buf.into_inner())
+        let Source { bytes, decoded, width: src_w, fmt: src_fmt, .. } = source;
+        encode_variant(bytes, decoded, *src_w, *src_fmt, width, fmt)
     }
+}
+
+/// One variant of an image: `width` pixels wide in `fmt`. `decoded` caches the
+/// decoded source across calls for the same image. The original at its own
+/// size and format is returned as it is: re-encoding could only lose quality
+/// or grow it.
+pub fn encode_variant(bytes: &[u8], decoded: &mut Option<DynamicImage>, src_w: u32, src_fmt: Fmt, width: u32, fmt: Fmt) -> std::result::Result<Vec<u8>, String> {
+    if width >= src_w && fmt == src_fmt {
+        return Ok(bytes.to_vec());
+    }
+    if decoded.is_none() {
+        let img = ImageReader::new(Cursor::new(bytes)).with_guessed_format().map_err(|e| e.to_string())?.decode().map_err(|e| e.to_string())?;
+        *decoded = Some(img);
+    }
+    let full = decoded.as_ref().unwrap();
+    let resized;
+    let img: &DynamicImage = if width < src_w {
+        resized = full.resize(width, u32::MAX, FilterType::Lanczos3);
+        &resized
+    } else {
+        full
+    };
+    let mut buf = Cursor::new(Vec::new());
+    match fmt {
+        Fmt::Webp => {
+            let rgba = img.to_rgba8();
+            let encoder = webp::Encoder::from_rgba(&rgba, rgba.width(), rgba.height());
+            return Ok(encoder.encode(80.0).to_vec());
+        }
+        Fmt::Jpeg => {
+            let rgb = DynamicImage::ImageRgb8(img.to_rgb8());
+            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 82);
+            rgb.write_with_encoder(encoder).map_err(|e| e.to_string())?;
+        }
+        Fmt::Png => img.write_to(&mut buf, ImageFormat::Png).map_err(|e| e.to_string())?,
+    }
+    Ok(buf.into_inner())
 }
 
 fn count_ci(haystack: &str, needle: &str) -> usize {
