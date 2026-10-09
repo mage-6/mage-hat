@@ -42,8 +42,14 @@ pub const GRACE_DAYS: u64 = 14;
 const API: &str = "https://api.cloudflare.com/client/v4";
 const TOKEN_VAR: &str = "CLOUDFLARE_API_TOKEN";
 
-/// A `media:name` wherever an attribute or a JSON string would hold a path.
-static REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"(["'(]|&quot;)media:([a-z0-9-]+)"#).unwrap());
+/// The pattern for `media:<name>` wherever an attribute or a JSON string would
+/// hold a path, also when written after the site's own address: the layout's
+/// og:image is `{{ site.url }}{{ page.image }}`, and it must keep working
+/// when the image moves to the bucket.
+pub fn ref_pattern(site_url: &str) -> Regex {
+    let site = if site_url.is_empty() { String::new() } else { format!("(?:{}/?)?", regex::escape(site_url.trim_end_matches('/'))) };
+    Regex::new(&format!(r#"(["'(]|&quot;){site}media:([a-z0-9-]+)"#)).unwrap()
+}
 
 /// The `[media]` table of site.toml.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,12 +178,12 @@ pub fn ladder(source_width: u32) -> Vec<u32> {
 
 /// Replace `media:<name>` references with addresses. Returns the text and
 /// the names that have no record, for the caller to report.
-pub fn rewrite_refs(text: &str, media: Option<&Media>, lib: &Library) -> (String, Vec<String>) {
+pub fn rewrite_refs(text: &str, media: Option<&Media>, lib: &Library, re: &Regex) -> (String, Vec<String>) {
     if !text.contains(PREFIX) {
         return (text.to_string(), Vec::new());
     }
     let mut unknown = Vec::new();
-    let out = REF.replace_all(text, |c: &regex::Captures| {
+    let out = re.replace_all(text, |c: &regex::Captures| {
         let name = &c[2];
         match (media, lib.get(name)) {
             (Some(m), Some(rec)) => format!("{}{}", &c[1], m.url_for(&rec.main_key(name))),
@@ -555,9 +561,10 @@ mod tests {
         let media = Media { url: "https://media.example.com".into(), bucket: "b".into(), account: "a".into() };
         let mut lib = Library::new();
         lib.insert("cover".into(), image_record());
-        let html = r#"<a href="media:cover">x</a><meta content='media:cover'>{"image":"media:cover"} url(media:cover) <a href="media:nope">y</a> media:prose"#;
-        let (out, unknown) = rewrite_refs(html, Some(&media), &lib);
+        let html = r#"<a href="media:cover">x</a><meta content='media:cover'>{"image":"media:cover"} url(media:cover) <a href="media:nope">y</a> <meta content="https://site.example/media:cover"> media:prose"#;
+        let (out, unknown) = rewrite_refs(html, Some(&media), &lib, &ref_pattern("https://site.example/"));
         assert!(out.contains("href=\"https://media.example.com/cover.abcdef0123.1600.jpg\""), "{out}");
+        assert!(out.contains("<meta content=\"https://media.example.com/cover.abcdef0123.1600.jpg\">"), "the site's own address in front is dropped: {out}");
         assert!(out.contains("content='https://media.example.com/cover.abcdef0123.1600.jpg'"));
         assert!(out.contains("\"image\":\"https://media.example.com/cover.abcdef0123.1600.jpg\""));
         assert!(out.contains("url(https://media.example.com/cover.abcdef0123.1600.jpg)"));

@@ -290,12 +290,13 @@ impl<'r> Builder<'r> {
     fn rewrite_media_refs(&mut self) {
         let keys: Vec<String> = self.r.outputs.keys().filter(|k| k.ends_with(".html") || k.ends_with(".xml")).cloned().collect();
         let media = self.r.cfg.media.clone();
+        let re = crate::media::ref_pattern(&self.r.cfg.url);
         for key in keys {
             let text = String::from_utf8_lossy(&self.r.outputs[&key]).to_string();
             if !text.contains(crate::media::PREFIX) {
                 continue;
             }
-            let (out, unknown) = crate::media::rewrite_refs(&text, media.as_ref(), &self.r.media);
+            let (out, unknown) = crate::media::rewrite_refs(&text, media.as_ref(), &self.r.media, &re);
             let file = self.r.pages.iter().find(|p| p.out == key).map(|p| p.file.clone()).unwrap_or_else(|| key.clone());
             for name in unknown {
                 // An <img> that images.rs could not resolve is still here with its

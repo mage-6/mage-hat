@@ -308,7 +308,9 @@ different file is an error: delete the record to replace it.
 `<picture>` a local image gets, with absolute addresses and a `srcset` of
 every width up to twice the display width. In `href`, `content`, `poster`,
 a `<video>` or `<source>` src, a feed or a JSON-LD string it becomes the
-file's address (for an image, the full-size original format). A name with no
+file's address (for an image, the full-size original format), also where
+the layout writes it after the site's own address, as `og:image` does with
+`{{ site.url }}{{ page.image }}`. A name with no
 record fails the build and names the command that writes one. The build
 reads only the records, so it stays offline and deterministic.
 

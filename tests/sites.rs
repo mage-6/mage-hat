@@ -735,6 +735,14 @@ fn media_files_are_addressed_in_the_bucket_from_their_records() {
     assert!(!html.contains("media:"), "{html}");
     assert!(!r.outputs.keys().any(|k| k.starts_with("_mh/img/cover")), "nothing is encoded locally");
     assert_eq!(build_site(&site).unwrap().outputs, r.outputs, "deterministic");
+
+    // The scaffold layout writes og:image as {{ site.url }}{{ page.image }}; a media cover survives that.
+    std::fs::write(site.join("src/pages/og.html"), "<title>T</title>\n<meta name=\"description\" content=\"d\">\n<meta name=\"image\" content=\"media:cover\">\n<x-base><p>x</p></x-base>\n").unwrap();
+    let r = run_check(&site).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    let og = text(&r, "og/index.html");
+    assert!(og.contains(&format!("property=\"og:image\" content=\"{m}.1600.jpg\"")), "{og}");
+    assert!(!og.contains("media:"), "{og}");
 }
 
 #[test]
