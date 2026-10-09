@@ -7,9 +7,6 @@ links:
   repo: https://github.com/mage-6/mage-hat
 ---
 
-## Next
-- A Google News sitemap needs "the last two days", which the clockless build cannot know; open until a site needs Google News (Discover does not)
-
 ## Decisions
 - Hard boundary: a static-site compiler, never an application framework. No server rendering, auth, databases, API routes, middleware, hydration, framework integrations, plugin system, or arbitrary code in templates. A project that needs those uses another framework
 - Boring, deterministic, tiny, stable: a deliberately small fixed syntax; failing clearly beats producing bad output
@@ -35,6 +32,8 @@ links:
 - Media (`[media]`, `magehat media add`, `media:<name>`) is the one piece that talks to a bucket, and only from a command, never from the build: the build reads committed records (`src/media/<name>.json`) and stays offline. Same shape as fonts and icons: network once, commit the result. Opt-in per site, because a landing page with a dozen fixed images gains nothing from a bucket; a site whose images grow with its content (a cover per story) turns it on
 - The media bucket is spoken to through the Cloudflare API's object endpoints with the account's API token (what wrangler uses), not S3: no second credential to create, store or rotate
 - Image variants for media are a fixed ladder (400, 800, 1200, 1600, 2000, 2400, then the source width) encoded at upload, since the build cannot encode a file it does not have; a record written today still matches a build made in two years
+- The Google News sitemap (`news = true`) takes the items dated within two days of the newest one: the build has no clock, so the newest story stands in for today, which holds because a news site deploys when it publishes
+- Generated robots.txt turns away training-only crawlers (CCBot, Bytespider, meta-externalagent) and every page defaults to `max-image-preview:large`; a site overrides robots.txt or llms.txt by shipping its own in `src/assets`
 - `media prune` keeps objects younger than 14 days whatever the records say: a story on an open branch has uploaded its cover before its record is merged, and a deploy of the main branch must not delete it
 
 ## Open questions

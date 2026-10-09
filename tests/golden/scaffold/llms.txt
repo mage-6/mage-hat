@@ -1,0 +1,4 @@
+# My Site
+
+- [Sitemap](https://example.com/sitemap.xml): every page
+- [blog feed](https://example.com/blog/feed.xml): the newest items

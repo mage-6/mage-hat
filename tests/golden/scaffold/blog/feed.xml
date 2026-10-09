@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:media="http://search.yahoo.com/mrss/">
   <channel>
     <title>My Site</title>
     <link>https://example.com/blog/</link>
@@ -10,14 +10,14 @@
       <title>A second post</title>
       <link>https://example.com/blog/second-post/</link>
       <guid>https://example.com/blog/second-post/</guid>
-      <pubDate>2026-02-01</pubDate>
+      <pubDate>Sun, 01 Feb 2026 00:00:00 +0000</pubDate>
       <description>Posts are ordered by date, newest first.</description>
     </item>
     <item>
       <title>Hello, world</title>
       <link>https://example.com/blog/hello-world/</link>
       <guid>https://example.com/blog/hello-world/</guid>
-      <pubDate>2026-01-15</pubDate>
+      <pubDate>Thu, 15 Jan 2026 00:00:00 +0000</pubDate>
       <description>The first post on this site.</description>
     </item>
   </channel>

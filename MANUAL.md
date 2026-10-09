@@ -126,7 +126,9 @@ they are not part of the body, the layout writes the head from them.
 title and a description. `404.html` becomes `/404.html`. Folders nest:
 `src/pages/shop/hats.html` -> `/shop/hats/`. A page that starts with
 `<meta name="robots" content="noindex">` gets that tag in its head and is
-left out of the sitemap. A `<style>` or `<script>` in a page is left where
+left out of the sitemap. Every other page gets
+`<meta name="robots" content="max-image-preview:large">`, which Google
+Discover needs before it shows a page's image large. A `<style>` or `<script>` in a page is left where
 it is.
 
 ## Components
@@ -221,7 +223,16 @@ List items with `each="post in blog"`. Item pages come from
       </article>
     </x-base>
 
-Set `feed = true` under `[collections.blog]` in site.toml to get `/blog/feed.xml`.
+Set `feed = true` under `[collections.blog]` in site.toml to get `/blog/feed.xml`:
+the newest 20 items (`feed_items = 30` to change it), each with its date,
+`author` and `image` (a `media:` name, a site path or an address) as Media
+RSS and an enclosure, so feed readers, Flipboard and social auto-posters
+show the picture. Dates are ISO 8601: `2026-10-09` or `2026-10-09T14:30:00Z`.
+
+A news site also sets `news = true` there: the build writes
+`/news-sitemap.xml` for Google News with the items dated within two days of
+the newest one (the build has no clock, so publish and deploy together),
+and robots.txt names it.
 
 ## Lists and archives
 
@@ -369,6 +380,15 @@ text escaped for a JSON string (you write the quotes, as in an attribute),
 a comma a loop leaves before `]` or `}` is forgiven. The result must be
 valid JSON or the build fails and says where; it is written compact. Every
 other `<script>` and `<style>` is left exactly as written.
+
+## robots.txt and llms.txt
+
+Both are generated unless `src/assets` holds the site's own. robots.txt
+allows everything, names the sitemaps and turns away the crawlers that only
+gather AI training data and send no readers (CCBot, Bytespider,
+meta-externalagent); search engines and the AI answer engines that link
+their sources stay allowed. llms.txt gives the site's name, `description`
+from site.toml, and links to the sitemap and the feeds.
 
 ## IndexNow
 

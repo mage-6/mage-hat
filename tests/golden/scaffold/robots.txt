@@ -1,3 +1,9 @@
 User-agent: *
 Allow: /
+
+User-agent: CCBot
+User-agent: Bytespider
+User-agent: meta-externalagent
+Disallow: /
+
 Sitemap: https://example.com/sitemap.xml

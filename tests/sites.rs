@@ -684,6 +684,48 @@ fn indexnow_writes_a_key_file_derived_from_the_url() {
     assert_eq!(text(&r, &format!("{key}.txt")), key);
 }
 
+/// A news collection: a feed readers and Flipboard accept, a Google News
+/// sitemap of the newest two days, and robots.txt naming it.
+#[test]
+fn news_collections_get_a_news_sitemap_and_a_full_feed() {
+    let site = news("news-sitemap");
+    let toml = std::fs::read_to_string(site.join("site.toml")).unwrap();
+    std::fs::write(site.join("site.toml"), format!("{toml}
+[collections.posts]
+feed = true
+news = true
+feed_items = 3
+")).unwrap();
+    let post = site.join("src/content/posts/elden-ring-dlc.md");
+    let body = std::fs::read_to_string(&post).unwrap();
+    std::fs::write(&post, body.replacen("date: 2026-03-05", "date: 2026-03-05T14:30:00-03:00
+author: Ana Souza
+image: /covers/dlc.jpg", 1)).unwrap();
+    let r = build_site(&site).unwrap();
+    assert!(r.ok(), "{:?}", r.errors);
+
+    // the newest is March 5; March 3 is within two days of it, March 2 is not
+    let sitemap = text(&r, "news-sitemap.xml");
+    assert!(sitemap.contains("<loc>https://news.example/posts/elden-ring-dlc/</loc>") && sitemap.contains("elden-ring-speedrun"), "{sitemap}");
+    assert!(!sitemap.contains("hollow-knight") && !sitemap.contains("untagged"), "{sitemap}");
+    assert!(sitemap.contains("<news:name>News</news:name><news:language>en</news:language>"), "{sitemap}");
+    assert!(sitemap.contains("<news:publication_date>2026-03-05T14:30:00-03:00</news:publication_date>"), "{sitemap}");
+    assert!(text(&r, "robots.txt").contains("Sitemap: https://news.example/news-sitemap.xml"));
+
+    let feed = text(&r, "posts/feed.xml");
+    assert_eq!(feed.matches("<item>").count(), 3, "feed_items caps the feed");
+    assert!(feed.contains("<pubDate>Thu, 05 Mar 2026 14:30:00 -0300</pubDate>"), "{feed}");
+    assert!(feed.contains("<dc:creator>Ana Souza</dc:creator>"), "{feed}");
+    assert!(feed.contains("<enclosure url=\"https://news.example/covers/dlc.jpg\" length=\"0\" type=\"image/jpeg\"/>"), "{feed}");
+    assert!(feed.contains("<media:content url=\"https://news.example/covers/dlc.jpg\" medium=\"image\" type=\"image/jpeg\"/>"), "{feed}");
+    assert!(text(&r, "llms.txt").contains("- [posts feed](https://news.example/posts/feed.xml)"));
+
+    // without news = true there is no news sitemap and robots.txt does not name one
+    let plain = news("news-plain");
+    let r = build_site(&plain).unwrap();
+    assert!(!r.outputs.contains_key("news-sitemap.xml") && !text(&r, "robots.txt").contains("news-sitemap"));
+}
+
 /// The error a site fails to load with, before any page is built.
 fn build_error(site: &Path) -> magehat::errors::MageError {
     match build_site(site) {

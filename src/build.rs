@@ -11,7 +11,10 @@ use crate::errors::{MageError, Result};
 use crate::htmltree::{parse, Node};
 use crate::pages::{discover_pages, list_url, output_path, page_url, resolve, term_slug, PageSource};
 use crate::render::{interpolate, render_fragment, render_nodes, Env, Mode};
-use crate::seo::{alternate_links, inject_head, robots_txt, rss_xml, sitemap_xml, FeedItem, SitemapEntry, Translation};
+use crate::seo::{
+    alternate_links, inject_head, llms_txt, news_sitemap_xml, rfc822, robots_txt, rss_xml, sitemap_xml, FeedImage, FeedItem, NewsEntry,
+    SitemapEntry, Translation,
+};
 use crate::values::{to_text, Ctx, Map, Value};
 use indexmap::{IndexMap, IndexSet};
 use std::collections::{BTreeMap, HashMap};
@@ -876,10 +879,12 @@ impl<'r> Builder<'r> {
         let mut lines = Vec::new();
         // Page metadata is stripped from the body; a robots directive written
         // there (noindex) still has to reach the head.
-        if let Some(robots) = robots {
-            if !html.contains("name=\"robots\"") {
-                lines.push(format!("<meta name=\"robots\" content=\"{}\">", crate::values::escape_attr_str(robots)));
-            }
+        if !html.contains("name=\"robots\"") {
+            // Without a directive of its own, every page lets search show its
+            // images large: Google Discover gives the big card only to pages
+            // that allow it, and nothing is lost by allowing it everywhere.
+            let robots = robots.unwrap_or("max-image-preview:large");
+            lines.push(format!("<meta name=\"robots\" content=\"{}\">", crate::values::escape_attr_str(robots)));
         }
         for tag in used {
             let comp = &self.r.components[tag];
@@ -982,17 +987,29 @@ impl<'r> Builder<'r> {
                 continue;
             }
             let description = opts.get("description").and_then(|v| v.as_str()).unwrap_or(&cfg.name).to_string();
+            // Twenty covers two days at ten stories a day, so a reader that
+            // stops polling for an afternoon misses nothing, and is the
+            // minimum Flipboard asks for. Every item would grow without end.
+            let limit = opts.get("feed_items").and_then(|v| v.as_integer()).filter(|n| *n > 0).unwrap_or(20) as usize;
             for lang in &cfg.languages {
-                let items: Vec<FeedItem> = self.items[lang][coll]
-                    .iter()
-                    .filter(|d| d.get("url").and_then(|u| u.as_str()).is_some())
-                    .map(|d| FeedItem {
+                let mut items = Vec::new();
+                for d in self.items[lang][coll].iter().filter(|d| d.get("url").and_then(|u| u.as_str()).is_some()).take(limit) {
+                    let url = format!("{}{}", cfg.url, d["url"].as_str().unwrap());
+                    let raw_date = d.get("date").map(to_text).filter(|s| !s.is_empty());
+                    let date = raw_date.as_deref().and_then(rfc822);
+                    if let (Some(raw), None) = (&raw_date, &date) {
+                        self.r.warn(format!("{url}: date {raw:?} is not an ISO 8601 date, so its feed item has no pubDate"), None,
+                            Some("write dates as 2026-10-09 or 2026-10-09T14:30:00Z"));
+                    }
+                    items.push(FeedItem {
                         title: d.get("title").map(to_text).unwrap_or_default(),
-                        url: format!("{}{}", cfg.url, d["url"].as_str().unwrap()),
-                        date: d.get("date").map(to_text).filter(|s| !s.is_empty()),
+                        url,
+                        date,
+                        author: d.get("author").map(to_text).filter(|s| !s.is_empty()),
+                        image: d.get("image").map(to_text).and_then(|s| self.feed_image(&s)),
                         text: d.get("description").map(to_text).filter(|s| !s.is_empty()).unwrap_or_else(|| d.get("body").map(to_text).unwrap_or_default()),
-                    })
-                    .collect();
+                    });
+                }
                 if items.is_empty() {
                     continue;
                 }
@@ -1003,9 +1020,78 @@ impl<'r> Builder<'r> {
         }
     }
 
+    /// An item's `image` for its feed entry: a `media:` record, a site path or
+    /// an address. A media image goes out at the widest variant up to 1600 px
+    /// in its original format: past every surface's minimum (Discover 1200,
+    /// Flipboard 500 on the short side), readable by readers that refuse WebP.
+    fn feed_image(&self, raw: &str) -> Option<FeedImage> {
+        let raw = raw.trim();
+        if let Some(name) = raw.strip_prefix(crate::media::PREFIX) {
+            let (media, rec) = (self.r.cfg.media.as_ref()?, self.r.media.get(name)?);
+            if !rec.is_image() {
+                return None;
+            }
+            let (w, h) = (rec.width?, rec.height?);
+            let pick = rec.widths.iter().copied().filter(|&x| x <= 1600).max().unwrap_or(w);
+            return Some(FeedImage {
+                url: media.url_for(&rec.variant_key(name, pick, &rec.ext)),
+                mime: rec.mime.clone(),
+                width: Some(pick),
+                height: Some(((u64::from(h) * u64::from(pick) + u64::from(w) / 2) / u64::from(w)) as u32),
+                length: if pick == w { rec.size } else { 0 },
+            });
+        }
+        let url = if raw.starts_with('/') {
+            format!("{}{raw}", self.r.cfg.url)
+        } else if raw.starts_with("https://") || raw.starts_with("http://") {
+            raw.to_string()
+        } else {
+            return None;
+        };
+        let ext = url.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+        let mime = match ext.as_str() {
+            "jpg" | "jpeg" => "image/jpeg",
+            "png" => "image/png",
+            "webp" => "image/webp",
+            "gif" => "image/gif",
+            "avif" => "image/avif",
+            _ => return None,
+        };
+        Some(FeedImage { url, mime: mime.into(), width: None, height: None, length: 0 })
+    }
+
+    /// Google News sitemap entries for collections with `news = true`: items
+    /// dated within two days of the newest one. The build has no clock, so
+    /// the newest story stands in for "today"; a site that publishes news
+    /// deploys when it publishes, and Google ignores entries past two days.
+    fn news_entries(&self) -> Vec<NewsEntry> {
+        let mut dated: Vec<(u64, NewsEntry)> = Vec::new();
+        for (coll, opts) in &self.r.cfg.collections {
+            if !opts.get("news").and_then(|v| v.as_bool()).unwrap_or(false) || !self.r.collections.contains_key(coll) {
+                continue;
+            }
+            for lang in &self.r.cfg.languages {
+                for d in &self.items[lang][coll] {
+                    let (Some(url), Some(date)) = (d.get("url").and_then(|u| u.as_str()), d.get("date").map(to_text)) else { continue };
+                    let Some(day) = crate::media::days_since_epoch(&date) else { continue };
+                    if d.get("robots").map(to_text).is_some_and(|r| r.to_ascii_lowercase().contains("noindex")) {
+                        continue;
+                    }
+                    let title = d.get("title").map(to_text).unwrap_or_default();
+                    dated.push((day, NewsEntry { url: url.to_string(), lang: lang.clone(), title, date }));
+                }
+            }
+        }
+        let newest = dated.iter().map(|(d, _)| *d).max().unwrap_or(0);
+        dated.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.url.cmp(&b.1.url)));
+        // Google reads at most 1,000 entries.
+        dated.into_iter().filter(|(d, _)| *d + 2 >= newest).take(1000).map(|(_, e)| e).collect()
+    }
+
     fn write_sitemap_and_robots(&mut self) {
+        let news = if self.r.cfg.url.is_empty() { Vec::new() } else { self.news_entries() };
         if !self.r.outputs.contains_key("robots.txt") {
-            self.r.outputs.insert("robots.txt".into(), robots_txt(&self.r.cfg.url).into_bytes());
+            self.r.outputs.insert("robots.txt".into(), robots_txt(&self.r.cfg.url, !news.is_empty()).into_bytes());
         }
         if self.r.cfg.url.is_empty() {
             let skipped = if self.r.cfg.indexnow { "sitemap.xml, canonical links and the IndexNow key file skipped" } else { "sitemap.xml and canonical links skipped" };
@@ -1022,6 +1108,21 @@ impl<'r> Builder<'r> {
             .map(|p| SitemapEntry { url: p.url.clone(), lastmod: p.lastmod.clone(), translations: p.translations.clone() })
             .collect();
         self.r.outputs.insert("sitemap.xml".into(), sitemap_xml(&entries, &self.r.cfg.url).into_bytes());
+        if !news.is_empty() {
+            self.r.outputs.insert("news-sitemap.xml".into(), news_sitemap_xml(&news, &self.r.cfg.name, &self.r.cfg.url).into_bytes());
+        }
+        if !self.r.outputs.contains_key("llms.txt") {
+            let cfg = &self.r.cfg;
+            let description = cfg.extra.get("description").and_then(|v| v.as_str()).unwrap_or("");
+            let feeds: Vec<(String, String)> = cfg
+                .collections
+                .iter()
+                .filter(|(coll, o)| o.get("feed").and_then(|v| v.as_bool()).unwrap_or(false) && self.r.collections.contains_key(*coll))
+                .map(|(coll, _)| (format!("{coll} feed"), format!("{}/{coll}/feed.xml", cfg.url)))
+                .collect();
+            let text = llms_txt(&cfg.name, description, &cfg.url, &feeds);
+            self.r.outputs.insert("llms.txt".into(), text.into_bytes());
+        }
         if let Some((file, key)) = crate::indexnow::key_file(&self.r.cfg) {
             self.r.outputs.insert(file, key.into_bytes());
         }
