@@ -287,7 +287,10 @@ terms themselves, so write that page yourself from `terms.blog.tags`.
 Write a plain `<img>` pointing at a JPEG, PNG or WebP under `src/assets`.
 MageHat fills in width and height, adds lazy loading and a WebP version,
 and with a `width` generates resized 1x and 2x variants. An `<img>` you put
-inside your own `<picture>` is left alone. Every asset also gets a
+inside your own `<picture>` is left alone. The `<picture>` MageHat adds is
+what a flex or grid layout sizes, so an image beside text needs
+`picture { flex: none; }` and `max-width: none` on the `<img>`, or the row
+squeezes it out of shape. Every asset also gets a
 content-hashed copy and references are rewritten to it; keep writing the
 plain path. Output HTML and CSS are minified. Encoded images are cached in
 `.magehat/cache` by content hash, the only cache there is.
