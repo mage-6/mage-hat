@@ -103,6 +103,24 @@ if ($os -eq 'windows') {
     if ($LASTEXITCODE -ne 0) { throw "tar failed" }
 }
 
+# The same package again under a name with no version in it, inside and out, so a build
+# command can fetch the current release through GitHub's releases/latest/download/ redirect
+# and never pin a version (the website skill's deploy command).
+$latestName = "magehat-$os-$arch"
+$latestStage = Join-Path $releaseDir $latestName
+if (Test-Path $latestStage) { Remove-Item $latestStage -Recurse -Force }
+Copy-Item $stage $latestStage -Recurse
+if ($os -eq 'windows') {
+    $latest = Join-Path $releaseDir "$latestName.zip"
+    if (Test-Path $latest) { Remove-Item $latest -Force }
+    Compress-Archive -Path $latestStage -DestinationPath $latest
+} else {
+    $latest = Join-Path $releaseDir "$latestName.tar.gz"
+    if (Test-Path $latest) { Remove-Item $latest -Force }
+    & tar -czf $latest -C $releaseDir $latestName
+    if ($LASTEXITCODE -ne 0) { throw "tar failed" }
+}
+
 $size = [math]::Round((Get-Item $exe).Length / 1MB, 1)
 $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
 
@@ -110,5 +128,6 @@ Write-Host ""
 Write-Host "Packaged $name"
 Write-Host "  folder   $stage"
 Write-Host "  archive  $archive"
+Write-Host "  latest   $latest"
 Write-Host "  exe      $size MB"
 Write-Host "  sha256   $hash"
