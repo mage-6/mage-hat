@@ -31,6 +31,7 @@ pub fn run_check(root: &Path) -> Result<BuildResult> {
     check_open_graph(&mut r);
     check_i18n_parity(&mut r);
     check_external_fonts(&mut r);
+    crate::analytics::check(&mut r);
     Ok(r)
 }
 

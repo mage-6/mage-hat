@@ -84,7 +84,7 @@ whole document; pages land in the `<slot>`):
 
 ## Files
 
-    site.toml            name, url, languages, collections
+    site.toml            name, url, languages, collections, media, analytics
     src/pages/           one HTML file per page: about.html -> /about/
                          blog/[post].html -> /blog/<slug>/ (see Collections)
                          tags/[tag].html  -> /tags/<term>/ (see Lists and archives)
@@ -405,6 +405,26 @@ derived from `url`: nothing to generate, store or keep secret. After each
 production deploy, `magehat indexnow` submits every URL in the live
 sitemap. Run it where a failure cannot fail the deploy: the site is already
 up, and the engines still find changes through the sitemap, only slower.
+
+## Analytics
+
+    [analytics]                     in site.toml
+    endpoint = "https://events.example.com/v2/my-site"
+
+    <a href="/signup/" data-track="signup">Start free</a>
+
+With the table set, every page loads one small module, `/_mh/analytics.<hash>.js`,
+written by the build: the web beacon of the analytics skill, copied in
+verbatim and never fetched from anywhere else, plus the two events a
+website has. `page_view` goes out on every page load and `conversion` with
+the kind when an element carrying `data-track="<kind>"` is clicked, the
+page path and referrer host with each (never a full URL). The kind is a
+lowercase token (`signup`, `download`, `purchase`, `contact`); `check`
+reports one that is not, and a `data-track` on a site with no `[analytics]`.
+A `version` key in site.toml, when the site has one, travels in the batch
+header. No cookies, no storage, nothing identifying, so no consent banner.
+A page served from localhost sends nothing, so `magehat dev` never counts.
+Without the table the build adds nothing, not a byte.
 
 ## Languages
 

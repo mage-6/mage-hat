@@ -813,3 +813,56 @@ fn media_mistakes_fail_the_build_with_the_fix() {
     let err = build_error(&site);
     assert!(err.to_string().contains("[media] needs bucket"), "{err}");
 }
+
+/// `[analytics]` ships the beacon and fires the two website events; without
+/// it the site carries not a byte of analytics.
+#[test]
+fn analytics_beacon_is_opt_in() {
+    let site = scaffold("analytics");
+    page(&site, "pricing.html", "<a href=\"/about/\" data-track=\"signup\">Start</a>");
+    let off = run_check(&site).unwrap();
+    assert!(off.errors.is_empty(), "{:?}", off.errors);
+    assert!(!off.outputs.keys().any(|k| k.starts_with("_mh/analytics.")), "no script unless asked for");
+    for (key, bytes) in &off.outputs {
+        let s = String::from_utf8_lossy(bytes);
+        assert!(!s.contains("createBeacon") && !s.contains("_mh/analytics"), "{key} carries analytics without the flag");
+    }
+    let got: Vec<String> = off.warnings.iter().map(|w| w.to_string()).collect();
+    assert_eq!(got, ["src/pages/pricing.html: data-track=\"signup\" on /pricing/ counts nothing without [analytics] in site.toml"], "{got:?}");
+
+    let toml = std::fs::read_to_string(site.join("site.toml")).unwrap();
+    let endpoint = "https://events.example.com/v2/my-site";
+    // A top-level key goes before the first table header, or TOML files it under that table.
+    std::fs::write(site.join("site.toml"), format!("version = \"1.2.0\"\n{toml}\n[analytics]\nendpoint = \"{endpoint}\"\n")).unwrap();
+    let r = run_check(&site).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings.iter().map(|w| w.to_string()).collect::<Vec<_>>());
+    let name = r.outputs.keys().find(|k| k.starts_with("_mh/analytics.") && k.ends_with(".js")).cloned().expect("the beacon module");
+    let js = text(&r, &name);
+    let beacon = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/beacon.js")).unwrap();
+    assert!(js.starts_with(beacon.trim_end()), "beacon.js verbatim, first");
+    assert!(js.contains(&format!("createBeacon(\"{endpoint}\", \"1.2.0\")")), "{js}");
+    assert!(js.contains("analytics(\"page_view\");"), "{js}");
+    assert!(js.contains("closest(\"[data-track]\")") && js.contains("analytics(\"conversion\", [el.getAttribute(\"data-track\")])"), "{js}");
+    assert!(!js.contains("import ") && !js.contains("http://"), "self-contained: {js}");
+    let tag = format!("<script type=\"module\" src=\"/{name}\"></script>");
+    for out in ["index.html", "pricing/index.html", "blog/hello-world/index.html", "404.html"] {
+        assert!(text(&r, out).contains(&tag), "{out} does not load the beacon");
+    }
+    assert_eq!(text(&r, "index.html").matches("/_mh/analytics.").count(), 1, "once per page");
+    assert!(text(&r, "pricing/index.html").contains("data-track=\"signup\""), "the attribute stays for the click handler");
+    assert_eq!(build_site(&site).unwrap().outputs, r.outputs, "deterministic");
+
+    page(&site, "pricing.html", "<button data-track=\"Sign Up\">Start</button>");
+    let r = run_check(&site).unwrap();
+    let got: Vec<String> = r.warnings.iter().map(|w| w.to_string()).collect();
+    assert_eq!(got, ["src/pages/pricing.html: data-track=\"Sign Up\" on /pricing/ is not an event token"], "{got:?}");
+    assert!(r.warnings[0].fix.as_deref().unwrap().contains("data-track=\"signup\""));
+
+    std::fs::write(site.join("site.toml"), format!("{toml}\n[analytics]\nendpoint = \"http://events.example.com/v2/x\"\n")).unwrap();
+    assert!(build_error(&site).to_string().contains("must start with https://"));
+    std::fs::write(site.join("site.toml"), format!("{toml}\n[analytics]\nslug = \"x\"\n")).unwrap();
+    assert!(build_error(&site).to_string().contains("no setting named \"slug\""));
+    std::fs::write(site.join("site.toml"), format!("analytics = true\n{toml}")).unwrap();
+    assert!(build_error(&site).to_string().contains("[analytics] must be a table"));
+}

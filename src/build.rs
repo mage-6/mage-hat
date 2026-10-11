@@ -278,6 +278,7 @@ impl<'r> Builder<'r> {
         let asset_keys = b.copy_assets();
         b.asset_map = crate::assets::plan(b.r, &asset_keys);
         b.write_component_assets();
+        b.write_analytics_script();
         let cache = b.r.cache_dir();
         crate::images::Images::new(b.r, &cache).process();
         b.finish_pages();
@@ -896,6 +897,9 @@ impl<'r> Builder<'r> {
             }
         }
         let cfg = &self.r.cfg;
+        if let Some(name) = self.analytics_script_name() {
+            lines.push(format!("<script type=\"module\" src=\"/{ASSET_DIR}/{name}\"></script>"));
+        }
         if !cfg.url.is_empty() && !html.contains("rel=\"canonical\"") {
             lines.push(format!("<link rel=\"canonical\" href=\"{}{url}\">", cfg.url));
         }
@@ -933,6 +937,21 @@ impl<'r> Builder<'r> {
             if !comp.script.is_empty() {
                 self.r.outputs.insert(format!("{ASSET_DIR}/{}", self.js_name(&comp)), format!("{}\n", comp.script).into_bytes());
             }
+        }
+    }
+
+    /// The beacon module's file name, None when `[analytics]` is not set.
+    fn analytics_script_name(&self) -> Option<String> {
+        let a = self.r.cfg.analytics.as_ref()?;
+        Some(crate::analytics::file_name(&crate::analytics::script(&self.r.cfg, a)))
+    }
+
+    /// One module for the whole site (analytics.rs); every page's head
+    /// already points at it.
+    fn write_analytics_script(&mut self) {
+        if let Some(a) = self.r.cfg.analytics.clone() {
+            let text = crate::analytics::script(&self.r.cfg, &a);
+            self.r.outputs.insert(format!("{ASSET_DIR}/{}", crate::analytics::file_name(&text)), text.into_bytes());
         }
     }
 

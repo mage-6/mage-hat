@@ -35,6 +35,7 @@ links:
 - The Google News sitemap (`news = true`) takes the items dated within two days of the newest one: the build has no clock, so the newest story stands in for today, which holds because a news site deploys when it publishes
 - Generated robots.txt turns away training-only crawlers (CCBot, Bytespider, meta-externalagent) and every page defaults to `max-image-preview:large`; a site overrides robots.txt or llms.txt by shipping its own in `src/assets`
 - `media prune` keeps objects younger than 14 days whatever the records say: a story on an open branch has uploaded its cover before its record is merged, and a deploy of the main branch must not delete it
+- Analytics is `[analytics] endpoint`, opt-in and nothing else: the build ships the analytics skill's `beacon.js` verbatim (`src/beacon.js`, a copy, never a runtime fetch) in one hashed module every page loads, fires `page_view` on load and `conversion` on a click of `data-track="<kind>"`, sends nothing from localhost, and adds no byte when the table is absent
 
 ## Open questions
 - Should missing translation keys fall back to the default language instead of failing the build?

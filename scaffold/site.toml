@@ -28,3 +28,10 @@ feed = true
 #   url = "https://media.example.com"   # the bucket's public address
 #   bucket = "example-bucket-media"
 #   account = "<Cloudflare account id>"
+
+# Analytics with no per-site code: every page sends a page view to this
+# endpoint, and a click on any element with data-track="signup" a conversion.
+# Nothing is added to the site until the table is set; see Analytics in
+# `magehat -h`:
+#   [analytics]
+#   endpoint = "https://events.example.com/v2/my-site"

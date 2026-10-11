@@ -3,6 +3,7 @@
 //! The library exposes the build so integration tests can compile sites in
 //! memory; the `magehat` binary is a thin command-line wrapper around it.
 
+pub mod analytics;
 pub mod assets;
 pub mod build;
 pub mod check;

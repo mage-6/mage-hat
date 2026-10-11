@@ -20,6 +20,9 @@
 //!     bucket = "example-bucket-media"
 //!     account = "<Cloudflare account id>"
 //!
+//!     [analytics]                       # the web beacon on every page (analytics.rs)
+//!     endpoint = "https://events.example.com/v2/my-site"
+//!
 //! Any other top-level key is exposed to templates as site.<key>.
 
 use crate::errors::{MageError, Result};
@@ -44,6 +47,8 @@ pub struct Config {
     pub indexnow: bool,
     /// The bucket that holds `media:` files (see media.rs).
     pub media: Option<crate::media::Media>,
+    /// Where the pages' analytics beacon posts (see analytics.rs).
+    pub analytics: Option<crate::analytics::Analytics>,
     pub extra: toml::Table,
 }
 
@@ -133,12 +138,36 @@ pub fn load_config(root: &Path) -> Result<Config> {
         Some(_) => return Err(MageError::in_file("indexnow must be true or false", "site.toml").fix("indexnow = true")),
     };
     let media = media_table(&mut table)?;
+    let analytics = analytics_table(&mut table)?;
     let url = table.remove("url").and_then(|v| v.as_str().map(|s| s.trim_end_matches('/').to_string())).unwrap_or_default();
     let name = table
         .remove("name")
         .and_then(|v| v.as_str().map(String::from))
         .unwrap_or_else(|| root.canonicalize().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_else(|| "site".into()));
-    Ok(Config { root: root.to_path_buf(), name, url, languages, collections, assets, icons, indexnow, media, extra: table })
+    Ok(Config { root: root.to_path_buf(), name, url, languages, collections, assets, icons, indexnow, media, analytics, extra: table })
+}
+
+/// `[analytics]`: the endpoint, and nothing else. An address that is not
+/// https fails here: the beacon would post every visitor's page path in clear.
+fn analytics_table(table: &mut toml::Table) -> Result<Option<crate::analytics::Analytics>> {
+    let Some(value) = table.remove("analytics") else { return Ok(None) };
+    let example = "[analytics]\nendpoint = \"https://events.<publisher domain>/v2/<site slug>\"";
+    let toml::Value::Table(t) = value else {
+        return Err(MageError::in_file("[analytics] must be a table with endpoint", "site.toml").fix(example));
+    };
+    for key in t.keys() {
+        if key != "endpoint" {
+            return Err(MageError::in_file(format!("[analytics] has no setting named {key:?}"), "site.toml").fix(example));
+        }
+    }
+    let endpoint = match t.get("endpoint").and_then(|v| v.as_str()).map(str::trim) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return Err(MageError::in_file("[analytics] needs endpoint in quotes", "site.toml").fix(example)),
+    };
+    if !endpoint.starts_with("https://") {
+        return Err(MageError::in_file("[analytics] endpoint must start with https://", "site.toml").fix(example));
+    }
+    Ok(Some(crate::analytics::Analytics { endpoint }))
 }
 
 /// `[media]`: url, bucket and account, all three or none. A half-filled table
