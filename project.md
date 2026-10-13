@@ -4,7 +4,7 @@ description: MageHat, a tiny deterministic compiler for plain-HTML static sites,
 kind: tool
 version_file: Cargo.toml
 links:
-  repo: https://github.com/mage-6/mage-hat
+  repo: https://github.com/robo-kick/mage-hat
 ---
 
 ## Decisions
