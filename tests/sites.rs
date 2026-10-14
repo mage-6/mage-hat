@@ -129,11 +129,28 @@ fn images_get_picture_sources_and_variants() {
     assert!(picture.contains(".600.webp 600w, /_mh/img/hat.") && picture.contains(".1200.webp 1200w\""), "{picture}");
     assert!(picture.contains("sizes=\"(max-width: 600px) 100vw, 600px\""));
     assert!(picture.contains("width=\"600\" height=\"400\""), "{picture}");
-    assert!(picture.contains("loading=\"lazy\"") && picture.contains("decoding=\"async\"") && picture.contains("alt=\"A hat"), "{picture}");
+    // The page's only image is its first, so it loads eagerly and early.
+    assert!(picture.contains("loading=\"eager\" fetchpriority=\"high\"") && picture.contains("decoding=\"async\"") && picture.contains("alt=\"A hat"), "{picture}");
     let variants: Vec<&String> = r.outputs.keys().filter(|k| k.starts_with("_mh/img/")).collect();
     assert_eq!(variants.len(), 4, "{variants:?}");
     assert!(site.join(".magehat/cache/img").is_dir());
     assert_eq!(build_site(&site).unwrap().outputs, r.outputs, "cached variants are byte-identical");
+}
+
+#[test]
+fn only_the_first_image_on_a_page_loads_eagerly() {
+    let site = scaffold("image-priority");
+    page(&site, "two.html", "<img src=\"/photos/hat.jpg\" alt=\"Hero\">\n<img src=\"/photos/hat.jpg\" alt=\"Later\">");
+    page(&site, "own.html", "<img src=\"/photos/hat.jpg\" alt=\"Hero\" loading=\"lazy\">\n<img src=\"/photos/hat.jpg\" alt=\"Later\">");
+    let r = build_site(&site).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    let two = text(&r, "two/index.html");
+    let (hero, later) = two.split_once("alt=\"Hero\"").unwrap();
+    assert!(hero.contains("loading=\"eager\" fetchpriority=\"high\""), "{two}");
+    assert!(later.contains("loading=\"lazy\"") && !later.contains("fetchpriority"), "{two}");
+    // The author's own choice on the first image stands, and nothing else is promoted.
+    let own = text(&r, "own/index.html");
+    assert!(!own.contains("eager") && !own.contains("fetchpriority"), "{own}");
 }
 
 #[test]

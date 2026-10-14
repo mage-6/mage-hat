@@ -298,7 +298,11 @@ terms themselves, so write that page yourself from `terms.blog.tags`.
 
 Write a plain `<img>` pointing at a JPEG, PNG or WebP under `src/assets`.
 MageHat fills in width and height, adds lazy loading and a WebP version,
-and with a `width` generates resized 1x and 2x variants. An `<img>` you put
+and with a `width` generates resized 1x and 2x variants. The first image on
+a page is taken to be its hero and loads at once and early instead
+(`loading="eager" fetchpriority="high"`); set `loading` on it to choose
+otherwise. Give a hero a `width` near its displayed size, or every visitor
+downloads the full original. An `<img>` you put
 inside your own `<picture>` is left alone. The `<picture>` MageHat adds is
 what a flex or grid layout sizes, so an image beside text needs
 `picture { flex: none; }` and `max-width: none` on the `<img>`, or the row

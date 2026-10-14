@@ -36,6 +36,7 @@ links:
 - Generated robots.txt turns away training-only crawlers (CCBot, Bytespider, meta-externalagent) and every page defaults to `max-image-preview:large`; a site overrides robots.txt or llms.txt by shipping its own in `src/assets`
 - `media prune` keeps objects younger than 14 days whatever the records say: a story on an open branch has uploaded its cover before its record is merged, and a deploy of the main branch must not delete it
 - Analytics is `[analytics] endpoint`, opt-in and nothing else: the build ships the analytics skill's `beacon.js` verbatim (`src/beacon.js`, a copy, never a runtime fetch) in one hashed module every page loads, fires `page_view` on load and `conversion` on a click of `data-track="<kind>"`, sends nothing from localhost, and adds no byte when the table is absent
+- Images load lazily except the first one MageHat handles on each page, which gets `loading="eager" fetchpriority="high"`: it is almost always the hero, and lazy loading it delayed the largest paint on every site. An author's own `loading` on that image wins
 - Item h2 and h3 headings get an id slugged by the archive-term rule (one slug rule) and the item exposes them as `toc`; Markdown's `{#id}` heading attributes stay off because the dialect is frozen, so an author's own id is a raw HTML heading. Ids are unique within an item; a page that renders several bodies or reuses a heading's id elsewhere is caught by `check`'s duplicate-id warning
 
 ## Open questions

@@ -63,8 +63,9 @@ specific site; `check --json` and `build --json` report findings as
 - Fonts: a Google Fonts `<link>` is fetched once into `src/assets/fonts/`
   and served from the site; visitors never connect to Google.
 - Structured data: a JSON-LD script is a template, checked as JSON.
-- Images: a plain `<img>` gets its size, lazy loading, a WebP source and
-  resized 1x/2x variants, cached in `.magehat/cache` by content hash.
+- Images: a plain `<img>` gets its size, lazy loading (the page's first
+  image loads early instead), a WebP source and resized 1x/2x variants,
+  cached in `.magehat/cache` by content hash.
 - Content-hashed asset names with references rewritten; minified output.
 - `check` finds undefined variables, syntax from other template languages,
   unclosed tags, broken links and anchors, missing titles, descriptions and

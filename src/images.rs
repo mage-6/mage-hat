@@ -6,7 +6,11 @@
 //!
 //! Any <img> whose src is a JPEG, PNG or WebP under src/assets gets its
 //! width and height filled in (no layout shift), loading="lazy" and
-//! decoding="async" unless set, and a WebP <source> in a <picture>. With a
+//! decoding="async" unless set, and a WebP <source> in a <picture>. The
+//! first such image on a page is usually its hero, the largest thing painted
+//! first, so it gets loading="eager" fetchpriority="high" instead: lazy
+//! loading it delays the Largest Contentful Paint search engines measure.
+//! With a
 //! `width`, resized variants at 1x and 2x are generated and offered through
 //! srcset. Variants are cached in .magehat/cache by content hash, so an
 //! unchanged image is never encoded twice. An <img> already inside a
@@ -97,13 +101,17 @@ impl<'a> Images<'a> {
     fn rewrite_page(&mut self, html: &str, page_out: &str, file: &str) -> String {
         let mut result = String::with_capacity(html.len());
         let mut last = 0;
+        let mut first = true;
         for m in IMG.find_iter(html) {
             result.push_str(&html[last..m.start()]);
             last = m.end();
             let before = &html[..m.start()];
             let inside_picture = count_ci(before, "<picture") > count_ci(before, "</picture");
-            match if inside_picture { None } else { self.rewrite_img(m.as_str(), page_out, file) } {
-                Some(tag) => result.push_str(&tag),
+            match if inside_picture { None } else { self.rewrite_img(m.as_str(), page_out, file, first) } {
+                Some(tag) => {
+                    first = false;
+                    result.push_str(&tag)
+                }
                 None => result.push_str(m.as_str()),
             }
         }
@@ -111,7 +119,9 @@ impl<'a> Images<'a> {
         result
     }
 
-    fn rewrite_img(&mut self, tag: &str, page_out: &str, file: &str) -> Option<String> {
+    /// `first`: this is the page's first image MageHat handles, so it loads
+    /// eagerly and early unless the author set `loading`.
+    fn rewrite_img(&mut self, tag: &str, page_out: &str, file: &str, first: bool) -> Option<String> {
         let (_, attrs, _) = scan_start_tag(tag)?;
         let attr = |name: &str| attrs.iter().find(|(k, _)| k == name).and_then(|(_, v)| v.clone());
         let src = attr("src")?;
@@ -137,7 +147,14 @@ impl<'a> Images<'a> {
             }
         }
         if attr("loading").is_none() {
-            img.push_str(" loading=\"lazy\"");
+            if first {
+                img.push_str(" loading=\"eager\"");
+                if attr("fetchpriority").is_none() {
+                    img.push_str(" fetchpriority=\"high\"");
+                }
+            } else {
+                img.push_str(" loading=\"lazy\"");
+            }
         }
         if attr("decoding").is_none() {
             img.push_str(" decoding=\"async\"");
