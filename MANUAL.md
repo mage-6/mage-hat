@@ -301,7 +301,9 @@ MageHat fills in width and height, adds lazy loading and a WebP version,
 and with a `width` generates resized 1x and 2x variants. The first image on
 a page is taken to be its hero and loads at once and early instead
 (`loading="eager" fetchpriority="high"`); set `loading` on it to choose
-otherwise. Give a hero a `width` near its displayed size, or every visitor
+otherwise. A page whose first image is your own `<picture>`, or that
+already marks an image `fetchpriority="high"`, has chosen its hero, and
+nothing else is promoted. Give a hero a `width` near its displayed size, or every visitor
 downloads the full original. An `<img>` you put
 inside your own `<picture>` is left alone. The `<picture>` MageHat adds is
 what a flex or grid layout sizes, so an image beside text needs

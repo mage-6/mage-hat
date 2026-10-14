@@ -151,6 +151,16 @@ fn only_the_first_image_on_a_page_loads_eagerly() {
     // The author's own choice on the first image stands, and nothing else is promoted.
     let own = text(&r, "own/index.html");
     assert!(!own.contains("eager") && !own.contains("fetchpriority"), "{own}");
+    // A hand-written <picture> hero, or any image already marked high priority, is the hero.
+    let site = scaffold("image-priority-authored");
+    page(&site, "pic.html", "<picture><img src=\"/photos/hat.jpg\" alt=\"Hero\"></picture>\n<img src=\"/photos/hat.jpg\" alt=\"Later\">");
+    page(&site, "marked.html", "<img src=\"/hero.svg\" alt=\"Hero\" fetchpriority=\"high\">\n<img src=\"/photos/hat.jpg\" alt=\"Later\">");
+    let r = build_site(&site).unwrap();
+    for p in ["pic/index.html", "marked/index.html"] {
+        let html = text(&r, p);
+        let later = html.split_once("alt=\"Hero\"").unwrap().1.split_once('>').unwrap().1;
+        assert!(later.contains("loading=\"lazy\"") && !later.contains("fetchpriority") && !later.contains("eager"), "{p}: {html}");
+    }
 }
 
 #[test]

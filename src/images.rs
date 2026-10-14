@@ -101,12 +101,17 @@ impl<'a> Images<'a> {
     fn rewrite_page(&mut self, html: &str, page_out: &str, file: &str) -> String {
         let mut result = String::with_capacity(html.len());
         let mut last = 0;
-        let mut first = true;
+        // A page that already marks an image high priority has chosen its hero.
+        let mut first = !html.to_ascii_lowercase().contains("fetchpriority=\"high\"");
         for m in IMG.find_iter(html) {
             result.push_str(&html[last..m.start()]);
             last = m.end();
             let before = &html[..m.start()];
             let inside_picture = count_ci(before, "<picture") > count_ci(before, "</picture");
+            if inside_picture {
+                // The author's own <picture> comes first: it is the hero, not the next image down.
+                first = false;
+            }
             match if inside_picture { None } else { self.rewrite_img(m.as_str(), page_out, file, first) } {
                 Some(tag) => {
                     first = false;
