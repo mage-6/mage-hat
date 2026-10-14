@@ -209,8 +209,20 @@ list that has no dates, such as a FAQ or a team:
 Markdown items start with a `---` metadata block (`title`, `description`,
 `date`, `slug`, `tags: [a, b]`, `draft: true`, anything else). HTML items
 start with `<title>` and `<meta>` instead. Every item exposes `id`, `url`,
-`title`, `body` (rendered HTML), `translations`, and its metadata.
+`title`, `body` (rendered HTML), `toc`, `translations`, and its metadata.
 Components can be used inside content: `<x-figure src="..."></x-figure>`.
+
+Every `h2` and `h3` in an item's body gets an `id`, slugged from its text
+like an archive term: accents folded, lowercase, anything else one hyphen,
+numbering kept (`## 1. Só para um adulto` is `#1-so-para-um-adulto`). A
+repeat within the item gets `-2`, `-3`. To choose the id, write the heading
+as HTML: `<h2 id="faq">Perguntas</h2>` keeps it. `toc` lists those headings
+in order as `{id, text, level}`, `text` plain and `level` 2 or 3, empty when
+there are none:
+
+    <nav if="post.toc"><ol>
+      <li each="h in post.toc"><a href="#{{ h.id }}">{{ h.text }}</a></li>
+    </ol></nav>
 
 List items with `each="post in blog"`. Item pages come from
 `src/pages/blog/[post].html`, which receives the item as `post` and takes

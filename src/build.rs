@@ -389,6 +389,7 @@ impl<'r> Builder<'r> {
         d.insert("url".into(), url);
         d.insert("translations".into(), translations_value(&translations));
         d.insert("body".into(), Value::html(String::new(), Vec::new()));
+        d.insert("toc".into(), Value::list(item.toc.iter().map(|t| t.value()).collect()));
         if !d.contains_key("title") {
             d.insert("title".into(), Value::str(&item.id));
         }

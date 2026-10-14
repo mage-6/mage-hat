@@ -32,4 +32,5 @@ pub mod new;
 pub mod pages;
 pub mod render;
 pub mod seo;
+pub mod toc;
 pub mod values;

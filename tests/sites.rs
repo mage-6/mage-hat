@@ -99,7 +99,7 @@ fn scaffold_page_content() {
     assert!(!text(&r, "about/index.html").contains("x-counter"), "assets only for components the page uses");
     let post = text(&r, "blog/hello-world/index.html");
     assert!(post.contains("<title>Hello, world · My Site</title>"));
-    assert!(post.contains("<h2>Headings, lists, code</h2>"));
+    assert!(post.contains("<h2 id=\"headings-lists-code\">Headings, lists, code</h2>"), "Markdown headings get an id");
     assert!(!post.contains("<p><x-counter"), "a lone component in Markdown is not wrapped in <p>");
     let css = r.outputs.iter().find(|(k, _)| k.starts_with("_mh/x-card.")).map(|(_, v)| String::from_utf8(v.clone()).unwrap()).unwrap();
     assert!(css.starts_with("x-card{display:contents}@scope (x-card) to (:scope :is("), "{css}");
@@ -522,6 +522,65 @@ fn anchors_and_social_images_are_checked() {
     let r = run_check(&site).unwrap();
     let got: Vec<String> = r.warnings.iter().map(|w| w.to_string()).collect();
     assert!(got.iter().any(|w| w.starts_with("src/pages/index.html: og:image \"/photos/hat.") && w.ends_with("on / is not an absolute URL")), "{got:?}");
+}
+
+#[test]
+fn markdown_headings_get_ids_and_items_a_toc() {
+    let site = scaffold("toc");
+    let blog = site.join("src/content/blog");
+    std::fs::write(
+        blog.join("guia.md"),
+        "---
+title: Guia
+description: d
+date: 2026-03-01
+---
+
+## 1. Só para um adulto
+
+texto
+
+### Cães & gatos: o que *muda*?
+
+## Dicas
+
+## Dicas
+
+<h2 id=\"faq\">Perguntas frequentes</h2>
+
+[topo](#1-so-para-um-adulto)
+",
+    )
+    .unwrap();
+    let template = site.join("src/pages/blog/[post].html");
+    let box_ = "<nav class=\"toc\" if=\"post.toc\"><ol><li each=\"h in post.toc\"><a href=\"#{{ h.id }}\">{{ h.text }}</a><b if=\"h.level == 3\">sub</b></li></ol></nav>";
+    std::fs::write(&template, std::fs::read_to_string(&template).unwrap().replace("{{ post.body }}", &format!("{box_}
+{{{{ post.body }}}}"))).unwrap();
+
+    let r = run_check(&site).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    assert!(r.warnings.is_empty(), "toc links pass the anchor check: {:?}", r.warnings.iter().map(|w| w.to_string()).collect::<Vec<_>>());
+    let guia = text(&r, "blog/guia/index.html");
+    assert!(guia.contains(concat!(
+        "<nav class=\"toc\"><ol>",
+        "<li><a href=\"#1-so-para-um-adulto\">1. Só para um adulto</a></li>",
+        "<li><a href=\"#caes-gatos-o-que-muda\">Cães &amp; gatos: o que muda?</a><b>sub</b></li>",
+        "<li><a href=\"#dicas\">Dicas</a></li>",
+        "<li><a href=\"#dicas-2\">Dicas</a></li>",
+        "<li><a href=\"#faq\">Perguntas frequentes</a></li>",
+        "</ol></nav>"
+    )), "{guia}");
+    assert!(guia.contains("<h2 id=\"1-so-para-um-adulto\">1. Só para um adulto</h2>") && guia.contains("<h3 id=\"caes-gatos-o-que-muda\">"), "{guia}");
+    assert!(guia.contains("<h2 id=\"faq\">Perguntas frequentes</h2>"), "the author's id is kept: {guia}");
+    // An item with no headings has an empty toc, which `if` treats as false.
+    assert!(!text(&r, "blog/second-post/index.html").contains("class=\"toc\""));
+
+    // A link to a heading that is not there is still reported.
+    let md = std::fs::read_to_string(blog.join("guia.md")).unwrap();
+    std::fs::write(blog.join("guia.md"), md.replace("(#1-so-para-um-adulto)", "(#so-para-um-adulto)")).unwrap();
+    let r = run_check(&site).unwrap();
+    let got: Vec<String> = r.warnings.iter().map(|w| w.message.clone()).collect();
+    assert_eq!(got, ["link \"#so-para-um-adulto\" on /blog/guia/ points at an id that is not on that page"], "{got:?}");
 }
 
 #[test]

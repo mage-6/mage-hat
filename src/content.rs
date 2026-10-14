@@ -6,7 +6,8 @@
 //!
 //! Markdown items carry metadata in a leading --- block; HTML items start with
 //! <title> and <meta name=... content=...> elements. `draft: true` hides an item.
-//! Items are ordered by `date` descending, then by id.
+//! Items are ordered by `date` descending, then by id. Their h2 and h3
+//! headings get ids and are listed as `toc` (see toc.rs).
 
 use crate::components::walk_files;
 use crate::config::Config;
@@ -14,6 +15,7 @@ use crate::errors::{MageError, Result};
 use crate::frontmatter::{parse_scalar, split_frontmatter};
 use crate::htmltree::{parse, serialize, Node};
 use crate::markdown::render_markdown;
+use crate::toc::{anchor_headings, TocEntry};
 use crate::values::{to_text, Map, Value};
 use indexmap::IndexMap;
 
@@ -26,6 +28,8 @@ pub struct Item {
     pub meta: Map,
     /// HTML text, still containing component tags to expand.
     pub body_html: String,
+    /// The h2 and h3 headings of the body, which now carry ids.
+    pub toc: Vec<TocEntry>,
 }
 
 impl Item {
@@ -115,13 +119,16 @@ fn order_key(item: &Item) -> (bool, f64) {
 
 fn load_item(path: &std::path::Path, rel: &str, collection: &str, id: String, lang: String) -> Result<Item> {
     let text = std::fs::read_to_string(path)?;
-    if rel.ends_with(".md") {
+    let (meta, mut body) = if rel.ends_with(".md") {
         let (meta, body, _) = split_frontmatter(&text, rel)?;
-        return Ok(Item { collection: collection.into(), id, lang, file: rel.into(), meta, body_html: render_markdown(&body) });
-    }
-    let nodes = parse(&text);
-    let (meta, start, _) = split_html_meta(&nodes);
-    Ok(Item { collection: collection.into(), id, lang, file: rel.into(), meta, body_html: serialize(&nodes[start..]) })
+        (meta, parse(&render_markdown(&body)))
+    } else {
+        let mut nodes = parse(&text);
+        let (meta, start, _) = split_html_meta(&nodes);
+        (meta, nodes.split_off(start))
+    };
+    let toc = anchor_headings(&mut body);
+    Ok(Item { collection: collection.into(), id, lang, file: rel.into(), meta, body_html: serialize(&body), toc })
 }
 
 /// Take leading <title> and <meta name= content=> elements as metadata.
