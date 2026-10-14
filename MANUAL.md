@@ -153,8 +153,9 @@ tested with `if="prop"`.
 The `<x-card>` element stays in the output, so a script can
 `customElements.define('x-card', ...)`. Styles are scoped (native `@scope`):
 they reach the component's own markup and whatever is slotted into it, and
-stop at nested components. Each component's CSS becomes its own stylesheet,
-loaded only by pages that use the component; what applies everywhere goes in
+stop at nested components. The CSS of every component the site uses goes
+into one stylesheet, `/_mh/components.<hash>.css`, which every page links
+once: one request, cached across pages. What applies everywhere goes in
 `src/assets/site.css`, which the sample site lays out as tokens, then bare
 elements, then variants. A component reads those tokens (`var(--accent)`)
 rather than repeating a value.
@@ -309,8 +310,12 @@ inside your own `<picture>` is left alone. The `<picture>` MageHat adds is
 what a flex or grid layout sizes, so an image beside text needs
 `picture { flex: none; }` and `max-width: none` on the `<img>`, or the row
 squeezes it out of shape. Every asset also gets a
-content-hashed copy and references are rewritten to it; keep writing the
-plain path. Output HTML and CSS are minified. Encoded images are cached in
+content-hashed copy under `/_mh/a/` and references are rewritten to it; keep
+writing the plain path. Everything MageHat writes under `/_mh/` has a hashed
+name, so the build adds a rule to `_headers` that lets browsers keep it for
+a year (Cloudflare otherwise has them recheck each file on every view); a
+site's own `src/assets/_headers` is kept and the rule appended, unless it
+already has one for `/_mh/*`. Output HTML and CSS are minified. Encoded images are cached in
 `.magehat/cache` by content hash, the only cache there is.
 
 ## Media

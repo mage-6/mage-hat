@@ -20,6 +20,8 @@ links:
 - Content files are flat (`id.md`, `id.pt-BR.md`); sub-folders are an error with a rename hint
 - Components must wrap their markup in `<template>`; anything else at top level is an error
 - Hashed asset copies are added and the originals kept, so unseen references (scripts, RSS) still work
+- Every hashed file lives under `/_mh/` (site assets under `/_mh/a/`, referenced root-absolute) so one `_headers` rule caches them all for a year: Cloudflare's `_headers` matches paths by prefix only, not by extension, and allows 100 rules. A site's own `_headers` is kept with the rule appended
+- Component CSS ships as one site-wide stylesheet, not one per component: a page linked 14 render-blocking files before 0.13.0. The few bytes of components a page does not use cost less than the requests
 - Minification only shortens whitespace runs, never removes them; tags and raw elements are untouched
 - Full rebuild every time; only image encoding is cached (`.magehat/cache`, keyed by content hash)
 - JSON-LD: `{{ }}` inserts JSON-string-escaped text and the author writes the quotes; trailing commas are forgiven and the result is re-parsed

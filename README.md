@@ -66,7 +66,9 @@ specific site; `check --json` and `build --json` report findings as
 - Images: a plain `<img>` gets its size, lazy loading (the page's first
   image loads early instead), a WebP source and resized 1x/2x variants,
   cached in `.magehat/cache` by content hash.
-- Content-hashed asset names with references rewritten; minified output.
+- Content-hashed asset names under `/_mh/` with references rewritten, cached
+  for a year through a generated `_headers` rule; one stylesheet for all
+  component CSS; minified output.
 - `check` finds undefined variables, syntax from other template languages,
   unclosed tags, broken links and anchors, missing titles, descriptions and
   alt text, duplicate ids, relative social images, and missing translations,

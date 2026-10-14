@@ -101,8 +101,8 @@ fn scaffold_page_content() {
     assert!(post.contains("<title>Hello, world · My Site</title>"));
     assert!(post.contains("<h2 id=\"headings-lists-code\">Headings, lists, code</h2>"), "Markdown headings get an id");
     assert!(!post.contains("<p><x-counter"), "a lone component in Markdown is not wrapped in <p>");
-    let css = r.outputs.iter().find(|(k, _)| k.starts_with("_mh/x-card.")).map(|(_, v)| String::from_utf8(v.clone()).unwrap()).unwrap();
-    assert!(css.starts_with("x-card{display:contents}@scope (x-card) to (:scope :is("), "{css}");
+    let css = r.outputs.iter().find(|(k, _)| k.starts_with("_mh/components.")).map(|(_, v)| String::from_utf8(v.clone()).unwrap()).unwrap();
+    assert!(css.contains("x-card{display:contents}@scope (x-card) to (:scope :is("), "{css}");
 }
 
 #[test]
@@ -111,10 +111,16 @@ fn output_is_minified_and_assets_hashed() {
     let index = text(&r, "index.html");
     assert!(!index.contains("\n  "), "indentation removed:\n{index}");
     assert!(!index.contains("<!--"), "comments removed");
-    let hashed = r.outputs.keys().find(|k| k.starts_with("site.") && k.ends_with(".css") && k.len() == "site.0123456789.css".len()).cloned().expect("hashed site.css");
+    let hashed = r.outputs.keys().find(|k| k.starts_with("_mh/a/site.") && k.ends_with(".css") && k.len() == "_mh/a/site.0123456789.css".len()).cloned().expect("hashed site.css");
     assert!(index.contains(&format!("href=\"/{hashed}\"")), "layout points at the hashed stylesheet");
     assert!(r.outputs.contains_key("site.css"), "original kept");
     assert!(!text(&r, &hashed).contains("\n"), "css minified");
+    // Every hashed file is under /_mh/, which the generated _headers keeps for a year.
+    let headers = text(&r, "_headers");
+    assert!(headers.contains("/_mh/*\n  Cache-Control: public, max-age=31536000, immutable"), "{headers}");
+    // All component CSS arrives in one stylesheet, linked once.
+    assert_eq!(index.matches("/_mh/components.").count(), 1, "{index}");
+    assert!(!r.outputs.keys().any(|k| k.starts_with("_mh/x-") && k.ends_with(".css")), "no stylesheet per component");
 }
 
 #[test]
@@ -448,9 +454,9 @@ fn google_fonts_are_served_locally() {
     let html = text(&r, "fonts/index.html");
     assert!(!html.contains("google") && !html.contains("gstatic") && !html.contains("preconnect"), "{html}");
     let css_link = html.lines().find(|l| l.contains("/fonts/inter.")).expect("local stylesheet link");
-    assert!(css_link.contains("<link href=\"/fonts/inter.") && css_link.ends_with(".css\" rel=\"stylesheet\">"), "{css_link}");
-    let css = r.outputs.iter().find(|(k, _)| k.starts_with("fonts/inter.") && k.ends_with(".css")).map(|(_, v)| String::from_utf8(v.clone()).unwrap()).unwrap();
-    assert!(css.contains("url(/fonts/inter/inter-400-normal-latin.") && css.contains(".woff2)"), "font file hashed too: {css}");
+    assert!(css_link.contains("<link href=\"/_mh/a/fonts/inter.") && css_link.ends_with(".css\" rel=\"stylesheet\">"), "{css_link}");
+    let css = r.outputs.iter().find(|(k, _)| k.starts_with("_mh/a/fonts/inter.") && k.ends_with(".css")).map(|(_, v)| String::from_utf8(v.clone()).unwrap()).unwrap();
+    assert!(css.contains("url(/_mh/a/fonts/inter/inter-400-normal-latin.") && css.contains(".woff2)"), "font file hashed too: {css}");
 
     std::fs::write(site.join("src/assets/site.css"), "@import url(https://fonts.googleapis.com/css2?family=Lora);\nbody { margin: 0 }\n").unwrap();
     let r = run_check(&site).unwrap();
@@ -483,7 +489,7 @@ fn ready_made_components_build_clean() {
     assert!(about.contains("\"@type\":\"FAQPage\"") && about.contains("\"name\":\"Does the site need a server?\""), "{about}");
     assert!(about.contains("\"text\":\"magehat new page <name>, then"), "answers are JSON strings: {about}");
     assert!(about.contains("<div class=\"faq-answer\">magehat new page &lt;name&gt;, then"), "and escaped text on the page: {about}");
-    let css = r.outputs.iter().find(|(k, _)| k.starts_with("_mh/x-faq.")).map(|(_, v)| String::from_utf8(v.clone()).unwrap()).unwrap();
+    let css = r.outputs.iter().find(|(k, _)| k.starts_with("_mh/components.")).map(|(_, v)| String::from_utf8(v.clone()).unwrap()).unwrap();
     assert!(css.contains(".faq-item[open]::details-content{block-size:auto;block-size:calc-size(auto,size)}"), "{css}");
 
     // Items from a collection: title and body instead of question and answer,
@@ -548,7 +554,7 @@ fn anchors_and_social_images_are_checked() {
     page(&site, "a.html", "<p>x</p>");
     let r = run_check(&site).unwrap();
     let got: Vec<String> = r.warnings.iter().map(|w| w.to_string()).collect();
-    assert!(got.iter().any(|w| w.starts_with("src/pages/index.html: og:image \"/photos/hat.") && w.ends_with("on / is not an absolute URL")), "{got:?}");
+    assert!(got.iter().any(|w| w.starts_with("src/pages/index.html: og:image \"/_mh/a/photos/hat.") && w.ends_with("on / is not an absolute URL")), "{got:?}");
 }
 
 #[test]
@@ -629,7 +635,7 @@ fn asset_and_icon_folders_can_live_outside_src() {
     assert!(r.warnings.is_empty(), "{:?}", r.warnings.iter().map(|w| w.to_string()).collect::<Vec<_>>());
     assert!(r.outputs.contains_key("brand/logo.svg"));
     let html = text(&r, "b/index.html");
-    assert!(html.contains("<img src=\"/brand/logo.") && html.contains("viewBox=\"0 0 1 1\" class=\"i\"><rect"), "{html}");
+    assert!(html.contains("<img src=\"/_mh/a/brand/logo.") && html.contains("viewBox=\"0 0 1 1\" class=\"i\"><rect"), "{html}");
 
     std::fs::write(site.join("site.toml"), format!("{toml}\n[assets]\nbrand = \"missing\"\n")).unwrap();
     let r = build_site(&site).unwrap();

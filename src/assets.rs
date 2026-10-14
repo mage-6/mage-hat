@@ -1,13 +1,18 @@
 //! Content-hashed asset names, with references rewritten.
 //!
 //! `src/assets/site.css` is still served at `/site.css`, and a copy named
-//! `/site.<hash>.css` is added. Every reference MageHat can see (href, src,
-//! srcset, poster, content, and url() inside CSS) is rewritten to the hashed
-//! name, so the hosting cache can keep it forever. Originals stay, so a
+//! `/_mh/a/site.<hash>.css` is added. Every reference MageHat can see (href,
+//! src, srcset, poster, content, and url() inside CSS) is rewritten to the
+//! hashed copy, always as a root-absolute URL. Originals stay, so a
 //! reference MageHat cannot see (inside a script, in an RSS reader) still
 //! works.
+//!
+//! Every hashed file MageHat writes lives under `/_mh/`, so one `_headers`
+//! rule (`headers`) tells the host to keep them all for a year: a file under
+//! a hashed name never changes, and without the rule Cloudflare makes the
+//! browser revalidate each one on every page view.
 
-use crate::build::BuildResult;
+use crate::build::{BuildResult, ASSET_DIR};
 use crate::components::digest_bytes;
 use regex::Regex;
 use std::collections::HashMap;
@@ -28,9 +33,29 @@ pub type AssetMap = HashMap<String, String>;
 
 fn hashed_name(key: &str, bytes: &[u8]) -> String {
     match key.rsplit_once('.') {
-        Some((stem, ext)) => format!("{stem}.{}.{ext}", digest_bytes(bytes)),
-        None => format!("{key}.{}", digest_bytes(bytes)),
+        Some((stem, ext)) => format!("{ASSET_DIR}/a/{stem}.{}.{ext}", digest_bytes(bytes)),
+        None => format!("{ASSET_DIR}/a/{key}.{}", digest_bytes(bytes)),
     }
+}
+
+/// The rule that lets browsers and Cloudflare keep everything under `/_mh/`
+/// for a year, appended to the site's own `_headers` when it ships one.
+const CACHE_RULE: &str = "/_mh/*\n  Cache-Control: public, max-age=31536000, immutable\n";
+
+/// The `_headers` file to publish: the site's own (if any) plus the cache
+/// rule for hashed files, unless the site already has a rule for `/_mh/*`.
+pub fn headers(own: Option<&[u8]>) -> Vec<u8> {
+    let own = own.map(|b| String::from_utf8_lossy(b).to_string()).unwrap_or_default();
+    if own.lines().any(|l| l.trim() == "/_mh/*") {
+        return own.into_bytes();
+    }
+    let mut out = own.trim_end().to_string();
+    if !out.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str("# Added by MageHat: files under /_mh/ have content-hashed names and never change.\n");
+    out.push_str(CACHE_RULE);
+    out.into_bytes()
 }
 
 fn hashable(key: &str) -> bool {
@@ -88,18 +113,12 @@ fn resolve(from: &str, value: &str) -> Option<(String, String)> {
     Some((key, suffix.to_string()))
 }
 
-/// The URL to write for a reference, relative-or-absolute as it was written.
+/// The URL to write for a reference: root-absolute, since the hashed copy
+/// lives under /_mh/a/, not beside the original.
 fn replacement(from: &str, value: &str, map: &AssetMap) -> Option<String> {
     let (key, suffix) = resolve(from, value)?;
     let hashed = map.get(&key)?;
-    if value.trim().starts_with('/') {
-        Some(format!("/{hashed}{suffix}"))
-    } else {
-        // Keep it relative: same directory as the original reference.
-        let file = hashed.rsplit_once('/').map(|(_, f)| f).unwrap_or(hashed);
-        let prefix = value.trim().rsplit_once('/').map(|(d, _)| format!("{d}/")).unwrap_or_default();
-        Some(format!("{prefix}{file}{suffix}"))
-    }
+    Some(format!("/{hashed}{suffix}"))
 }
 
 pub fn rewrite_css(text: &str, from: &str, map: &AssetMap) -> String {
@@ -139,13 +158,26 @@ mod tests {
     #[test]
     fn rewrites_absolute_and_relative_references() {
         let mut map = AssetMap::new();
-        map.insert("site.css".into(), "site.abc.css".into());
-        map.insert("img/a.png".into(), "img/a.def.png".into());
+        map.insert("site.css".into(), "_mh/a/site.abc.css".into());
+        map.insert("img/a.png".into(), "_mh/a/img/a.def.png".into());
         let html = "<link href=\"/site.css?v=1\"><img src=\"../img/a.png\" srcset=\"/img/a.png 1x, /img/b.png 2x\"><a href=\"/about/\">x</a>";
         assert_eq!(
             rewrite_html(html, "blog/index.html", &map),
-            "<link href=\"/site.abc.css?v=1\"><img src=\"../img/a.def.png\" srcset=\"/img/a.def.png 1x, /img/b.png 2x\"><a href=\"/about/\">x</a>"
+            "<link href=\"/_mh/a/site.abc.css?v=1\"><img src=\"/_mh/a/img/a.def.png\" srcset=\"/_mh/a/img/a.def.png 1x, /img/b.png 2x\"><a href=\"/about/\">x</a>"
         );
-        assert_eq!(rewrite_css("a{background:url('/img/a.png')} b{background:url(http://x/y.png)}", "site.css", &map), "a{background:url('/img/a.def.png')} b{background:url(http://x/y.png)}");
+        assert_eq!(rewrite_css("a{background:url('/img/a.png')} b{background:url(http://x/y.png)}", "site.css", &map), "a{background:url('/_mh/a/img/a.def.png')} b{background:url(http://x/y.png)}");
+        // A relative url() in a stylesheet resolves against the stylesheet's own folder.
+        assert_eq!(rewrite_css("a{background:url(a.png)}", "img/x.css", &map), "a{background:url(/_mh/a/img/a.def.png)}");
+    }
+
+    #[test]
+    fn headers_add_the_cache_rule_once() {
+        let fresh = String::from_utf8(headers(None)).unwrap();
+        assert!(fresh.contains("/_mh/*\n  Cache-Control: public, max-age=31536000, immutable"), "{fresh}");
+        let own = "/*\n  X-Frame-Options: DENY\n";
+        let merged = String::from_utf8(headers(Some(own.as_bytes()))).unwrap();
+        assert!(merged.starts_with(own) && merged.contains("/_mh/*\n  Cache-Control"), "{merged}");
+        let custom = "/_mh/*\n  Cache-Control: no-store\n";
+        assert_eq!(headers(Some(custom.as_bytes())), custom.as_bytes(), "a site's own rule for /_mh/* stands");
     }
 }

@@ -21,6 +21,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 pub const ASSET_DIR: &str = "_mh";
+/// Where a page's head points for the component stylesheet before it is hashed.
+const COMPONENT_CSS: &str = "_mh/components.css";
 
 #[derive(Debug, Clone)]
 pub struct BuiltPage {
@@ -284,6 +286,8 @@ impl<'r> Builder<'r> {
         b.finish_pages();
         b.write_feeds();
         b.write_sitemap_and_robots();
+        let own = b.r.outputs.get("_headers").cloned();
+        b.r.outputs.insert("_headers".into(), crate::assets::headers(own.as_deref()));
         // Last, so a reference in a feed or in structured data is covered too.
         b.rewrite_media_refs();
     }
@@ -888,11 +892,15 @@ impl<'r> Builder<'r> {
             let robots = robots.unwrap_or("max-image-preview:large");
             lines.push(format!("<meta name=\"robots\" content=\"{}\">", crate::values::escape_attr_str(robots)));
         }
+        // One stylesheet for every component on the site (write_component_assets),
+        // not one per component: each <link> blocks the first paint. The hashed
+        // name is only known once every page is rendered, so finish_pages
+        // rewrites this address to it.
+        if used.iter().any(|tag| !self.r.components[tag].style.is_empty()) {
+            lines.push(format!("<link rel=\"stylesheet\" href=\"/{COMPONENT_CSS}\">"));
+        }
         for tag in used {
             let comp = &self.r.components[tag];
-            if !comp.style.is_empty() {
-                lines.push(format!("<link rel=\"stylesheet\" href=\"/{ASSET_DIR}/{}\">", self.css_name(comp)));
-            }
             if !comp.script.is_empty() {
                 lines.push(format!("<script type=\"module\" src=\"/{ASSET_DIR}/{}\"></script>", self.js_name(comp)));
             }
@@ -921,20 +929,23 @@ impl<'r> Builder<'r> {
         crate::minify::css(&crate::assets::rewrite_css(&css, &format!("{ASSET_DIR}/x.css"), &self.asset_map))
     }
 
-    fn css_name(&self, comp: &Component) -> String {
-        format!("{}.{}.css", comp.tag, digest(&self.css_text(comp)))
-    }
-
     fn js_name(&self, comp: &Component) -> String {
         format!("{}.{}.js", comp.tag, digest(&comp.script))
     }
 
+    /// The component stylesheet, every used component's scoped CSS in the
+    /// order the site first uses them, under its hashed name; and each
+    /// component's script.
     fn write_component_assets(&mut self) {
+        let css: Vec<String> = self.used_all.iter().map(|t| &self.r.components[t]).filter(|c| !c.style.is_empty()).map(|c| self.css_text(c)).collect();
+        if !css.is_empty() {
+            let css = css.join("\n");
+            let name = format!("{ASSET_DIR}/components.{}.css", digest(&css));
+            self.r.outputs.insert(name.clone(), css.into_bytes());
+            self.asset_map.insert(COMPONENT_CSS.to_string(), name);
+        }
         for tag in self.used_all.clone() {
             let comp = self.r.components[&tag].clone();
-            if !comp.style.is_empty() {
-                self.r.outputs.insert(format!("{ASSET_DIR}/{}", self.css_name(&comp)), self.css_text(&comp).into_bytes());
-            }
             if !comp.script.is_empty() {
                 self.r.outputs.insert(format!("{ASSET_DIR}/{}", self.js_name(&comp)), format!("{}\n", comp.script).into_bytes());
             }
