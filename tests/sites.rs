@@ -724,6 +724,70 @@ fn lists_archives_and_limit() {
     assert_eq!(info["syntax"]["globals"].as_array().unwrap().iter().filter(|g| *g == "terms").count(), 1);
 }
 
+/// A collection named after an archive's field backs its terms: each term
+/// carries `item`, the record with the term's slug as id, body included,
+/// on the archive page, on the site's `terms` and on every item's own terms.
+/// A term with no record and a record with no term are warnings.
+#[test]
+fn archive_terms_carry_a_record() {
+    let site = news("records");
+    std::fs::create_dir_all(site.join("src/content/tags")).unwrap();
+    std::fs::write(site.join("src/content/tags/elden-ring.md"), "---\ntitle: Elden Ring\nstudio: FromSoftware\n---\nThe Lands Between.\n").unwrap();
+    std::fs::write(site.join("src/content/tags/orphan.md"), "---\ntitle: Orphan\n---\nNobody names this.\n").unwrap();
+    std::fs::write(
+        site.join("src/pages/tags/[tag].html"),
+        concat!(
+            "<title>{{ tag.name }}</title>\n<meta name=\"description\" content=\"Posts tagged {{ tag.name }}.\">\n",
+            "<meta name=\"list\" content=\"posts\">\n<meta name=\"by\" content=\"tags\">\n<meta name=\"per-page\" content=\"2\">\n\n",
+            "<x-base>\n  <h1>{{ tag.name }}</h1>\n",
+            "  <header class=\"hub\" if=\"tag.item\"><p class=\"studio\">{{ tag.item.studio }}</p><div class=\"intro\">{{ tag.item.body }}</div></header>\n",
+            "  <p class=\"bare\" if=\"not tag.item\">no record</p>\n",
+            "  <ul><li each=\"post in pager.items\">{{ post.title }}</li></ul>\n</x-base>\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        site.join("src/pages/posts/[post].html"),
+        concat!(
+            "<x-base>\n  <h1>{{ post.title }}</h1>\n",
+            "  <template each=\"tag in post.terms.tags\"><p class=\"from\" if=\"tag.item\">{{ tag.name }} by {{ tag.item.studio }}</p></template>\n",
+            "  <template each=\"tag in terms.posts.tags\"><p class=\"site\" if=\"tag.item\">{{ tag.slug }}</p></template>\n</x-base>\n"
+        ),
+    )
+    .unwrap();
+    let r = run_check(&site).unwrap();
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+
+    // the record, with its rendered body, on the archive page
+    let elden = text(&r, "tags/elden-ring/index.html");
+    assert!(elden.contains("<p class=\"studio\">FromSoftware</p>") && elden.contains("<div class=\"intro\"><p>The Lands Between.</p>"), "{elden}");
+    assert!(!elden.contains("no record"), "{elden}");
+    assert!(text(&r, "tags/elden-ring/page/2/index.html").contains("FromSoftware"), "every page of the archive carries it");
+    let acao = text(&r, "tags/acao/index.html");
+    assert!(acao.contains("<p class=\"bare\">no record</p>") && !acao.contains("hub"), "{acao}");
+    // no page for the record itself: the collection has no item page
+    assert!(!r.outputs.keys().any(|k| k.starts_with("tags/orphan")), "{:?}", r.outputs.keys().collect::<Vec<_>>());
+
+    // the same item on the post's own terms and on the site's terms
+    let post = text(&r, "posts/elden-ring-dlc/index.html");
+    assert!(post.contains("<p class=\"from\">Elden Ring by FromSoftware</p>"), "{post}");
+    assert_eq!(post.matches("class=\"from\"").count(), 1, "FromSoftware and Ação have no record: {post}");
+    assert!(post.contains("<p class=\"site\">elden-ring</p>") && post.matches("class=\"site\"").count() == 1, "{post}");
+
+    // a term with no record, and a record no item names
+    let warnings: Vec<String> = r.warnings.iter().map(|w| w.to_string()).collect();
+    assert_eq!(warnings.len(), 4, "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.contains("src/content/posts/elden-ring-dlc.md: tags \"Ação\" has no record in src/content/tags/")), "{warnings:?}");
+    assert!(r.warnings.iter().any(|w| w.fix.as_deref().unwrap_or("").contains("magehat new item tags acao")), "{:?}", r.warnings.iter().map(|w| w.fix.clone()).collect::<Vec<_>>());
+    assert!(warnings.iter().any(|w| w.contains("tags \"FromSoftware\" has no record")), "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.contains("tags \"Hollow Knight\" has no record")), "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.contains("record \"orphan\" matches no tags value on any posts item") && w.contains("src/content/tags/orphan.md")), "{warnings:?}");
+
+    let info = inspect_site(&site).unwrap();
+    let archive = info["pages"].as_array().unwrap().iter().find(|p| p["id"] == "tags/[tag]").unwrap();
+    assert_eq!(archive["records"], serde_json::json!("src/content/tags/"));
+}
+
 #[test]
 fn list_declarations_are_checked() {
     let site = news("news-errors");

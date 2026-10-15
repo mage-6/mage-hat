@@ -314,6 +314,25 @@ then name, for a tag cloud or a menu. Both exist only once the archive page
 does. The archive and list pages are in the sitemap; nothing lists the
 terms themselves, so write that page yourself from `terms.blog.tags`.
 
+A term that deserves content of its own (a game with a fact box and an
+intro above its stories, an author with a bio, a product line) gets it
+from a collection named after the field. With `src/content/games/` beside
+an archive page grouped by `games`, every term carries `item`: the record
+whose id is the term's slug, or null when there is none. A story saying
+`games: [Gears of War: E-Day]` is joined to
+`src/content/games/gears-of-war-e-day.md`, an ordinary item with metadata
+and a body and no item page of its own:
+
+    <header if="game.item">
+      <p>{{ game.item.developer }}</p>
+      {{ game.item.body }}
+    </header>
+
+The same `item` rides on `post.terms.games`, so the story page can show the
+game's facts too. `check` reports a term with no record and a record no
+item names, so a hub is never published bare and a record never left
+unlinked. A field cannot be backed by its own collection.
+
 ## Images and assets
 
     <img src="/photos/hat.jpg" alt="A hat" width="600">

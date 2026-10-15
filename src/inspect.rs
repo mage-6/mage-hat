@@ -93,6 +93,10 @@ fn pages(r: &BuildResult) -> Vec<Json> {
                 e["per_page"] = json!(l.per_page);
                 if let Some(by) = &l.by {
                     e["by"] = json!(by);
+                    // A collection named after the field backs the terms (Lists and archives).
+                    if by != &l.collection && r.collections.contains_key(by) {
+                        e["records"] = json!(format!("src/content/{by}/"));
+                    }
                 }
             } else if let Some(v) = &s.item_var {
                 e["collection"] = json!(s.collection);

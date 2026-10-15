@@ -240,6 +240,8 @@ struct PagerPlan {
     total: usize,
     /// The archive term's slug, None for a plain list.
     slug: Option<String>,
+    /// The field the archive groups by, None for a plain list.
+    by: Option<String>,
     /// The archive term, exposed under the page's bracket variable.
     term: Option<Map>,
 }
@@ -292,6 +294,7 @@ impl<'r> Builder<'r> {
         let languages = b.r.cfg.languages.clone();
         for lang in &languages {
             b.render_bodies(lang);
+            b.attach_term_records(lang);
             let root = b.root_ctx(lang);
             for inst in instances.iter().filter(|i| &i.lang == lang) {
                 b.render_instance(inst, &root);
@@ -477,9 +480,18 @@ impl<'r> Builder<'r> {
         out
     }
 
+    /// A collection named after an archive's field backs its terms: each
+    /// term's `item` is the record whose id is the term's slug. The field
+    /// cannot back itself.
+    fn term_records(&self, coll: &str, field: &str) -> bool {
+        field != coll && self.r.collections.contains_key(field)
+    }
+
     /// Archive pages group a collection by a field. Every distinct value
     /// becomes a term {name, slug, url, count}; the item gets `terms.<field>`
     /// with its own, and the site gets `terms.<collection>.<field>` with all.
+    /// A term backed by a record (term_records) also gets `item`, filled in
+    /// once bodies are rendered (attach_term_records); here it is null.
     fn build_terms(&mut self) {
         let sources = self.r.sources.clone();
         let cfg = self.r.cfg.clone();
@@ -534,6 +546,32 @@ impl<'r> Builder<'r> {
                         }
                     }
                 }
+                let records = self.term_records(coll, field);
+                if records && *lang == cfg.default_language() {
+                    // Reported once, for the default language: a term with
+                    // no record is a hub with nothing of its own on it, and
+                    // a record no item names is a page nothing links to.
+                    let ids: Vec<String> = self.items[lang][field].iter().map(|d| to_text(&d["id"])).collect();
+                    for (slug, (name, _, file)) in &groups {
+                        if !ids.contains(slug) {
+                            self.r.warn(
+                                format!("{field} {name:?} has no record in src/content/{field}/"),
+                                Some(file),
+                                Some(&format!("magehat new item {field} {slug}, or drop the value if it needs no page of its own")),
+                            );
+                        }
+                    }
+                    for (i, id) in ids.iter().enumerate() {
+                        if !groups.contains_key(id) {
+                            let file = self.r.collections[field][lang][i].file.clone();
+                            self.r.warn(
+                                format!("record {id:?} matches no {field} value on any {coll} item"),
+                                Some(&file),
+                                Some(&format!("name it in an item's {field}, or delete the record")),
+                            );
+                        }
+                    }
+                }
                 let mut terms: Vec<Map> = groups
                     .into_iter()
                     .map(|(slug, (name, count, _))| {
@@ -542,6 +580,9 @@ impl<'r> Builder<'r> {
                         t.insert("slug".into(), Value::str(&slug));
                         t.insert("url".into(), if has_page { Value::str(list_url(&cfg, identity, lang, Some(&slug), 1)) } else { Value::Null });
                         t.insert("count".into(), Value::Int(count as i64));
+                        if records {
+                            t.insert("item".into(), Value::Null);
+                        }
                         t
                     })
                     .collect();
@@ -573,6 +614,47 @@ impl<'r> Builder<'r> {
                 }
             }
             self.terms.insert(lang.clone(), per_coll);
+        }
+    }
+
+    /// Fill `item` on every backed term with its record, body included. The
+    /// terms were built before bodies were rendered, so the copies on the
+    /// site's `terms` and on each item's `terms.<field>` are refreshed here.
+    fn attach_term_records(&mut self, lang: &str) {
+        let Some(per_coll) = self.terms.get(lang) else { return };
+        let pairs: Vec<(String, String)> = per_coll
+            .iter()
+            .flat_map(|(c, fields)| fields.keys().map(move |f| (c.clone(), f.clone())))
+            .filter(|(c, f)| self.term_records(c, f))
+            .collect();
+        for (coll, field) in pairs {
+            let records: HashMap<String, Map> = self.items[lang][&field].iter().map(|d| (to_text(&d["id"]), d.clone())).collect();
+            let fill = |t: &mut Map| {
+                let slug = to_text(&t["slug"]);
+                t.insert("item".into(), records.get(&slug).map(|r| Value::map(r.clone())).unwrap_or(Value::Null));
+            };
+            for t in self.terms.get_mut(lang).unwrap().get_mut(&coll).unwrap().get_mut(&field).unwrap().iter_mut() {
+                fill(t);
+            }
+            for d in self.items.get_mut(lang).unwrap().get_mut(&coll).unwrap().iter_mut() {
+                let Some(Value::Map(own)) = d.get("terms") else { continue };
+                let mut own: Map = (**own).clone();
+                if let Some(Value::List(list)) = own.get(&field) {
+                    let refreshed: Vec<Value> = list
+                        .iter()
+                        .map(|v| match v {
+                            Value::Map(m) => {
+                                let mut m: Map = (**m).clone();
+                                fill(&mut m);
+                                Value::map(m)
+                            }
+                            other => other.clone(),
+                        })
+                        .collect();
+                    own.insert(field.clone(), Value::list(refreshed));
+                }
+                d.insert("terms".into(), Value::map(own));
+            }
         }
     }
 
@@ -696,6 +778,7 @@ impl<'r> Builder<'r> {
                                 count,
                                 total: indices.len(),
                                 slug: slug.clone(),
+                                by: spec.by.clone(),
                                 term: term.clone(),
                             }),
                         });
@@ -900,7 +983,13 @@ impl<'r> Builder<'r> {
         if let Some(plan) = &inst.pager {
             item_vars.insert("pager".into(), self.pager_value(inst, plan));
             if let (Some(var), Some(term)) = (&inst.item_var, &plan.term) {
-                item_vars.insert(var.clone(), Value::map(term.clone()));
+                // The planned term predates the records' bodies; the current
+                // one carries its `item` filled (attach_term_records).
+                let current = match (&plan.by, &plan.slug) {
+                    (Some(by), Some(slug)) => self.terms[&inst.lang][&plan.collection][by].iter().find(|t| to_text(&t["slug"]) == *slug).cloned(),
+                    _ => None,
+                };
+                item_vars.insert(var.clone(), Value::map(current.unwrap_or_else(|| term.clone())));
             }
         }
         let components = &self.r.components;
