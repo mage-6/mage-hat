@@ -1,10 +1,9 @@
-# Deploys the site to its Cloudflare Worker (wrangler.toml names it): on every
-# push to main, by hand from the Actions tab, and once a day so an item dated
-# in the future goes live on its date with nobody deploying (Collections and
-# Deploy in `magehat -h`). The steps live in the MageHat repository and every
-# site runs the current ones, like the binary itself. GitHub starts a schedule
-# minutes to hours late and may skip one under load; the next run publishes
-# whatever was due, so a date promises the day, never the hour.
+# Deploys the site to its Cloudflare Worker (wrangler.toml names it) on every
+# push to main and by hand from the Actions tab. Items dated ahead go live
+# through drip.yml, the daily run this one switches on while any are
+# scheduled and off when none are left (Collections and Deploy in
+# `magehat -h`). The steps live in the MageHat repository and every site runs
+# the current ones, like the binary itself.
 #
 # Needs one repository secret, CLOUDFLARE_API_TOKEN: Workers Scripts edit on
 # the site's Cloudflare account, plus R2 edit when site.toml has [media].
@@ -13,8 +12,9 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-  schedule:
-    - cron: "23 6 * * *"
+permissions:
+  contents: read
+  actions: write
 concurrency:
   group: deploy
   cancel-in-progress: false

@@ -47,12 +47,23 @@ pub fn run_check_with(root: &Path, clock: &Clock) -> Result<BuildResult> {
 /// scheduled item ever goes live. A site inside a larger repository is left
 /// alone; that repository's own workflows call the shared one.
 fn check_deploy_workflow(r: &mut BuildResult) {
-    let root = &r.cfg.root;
-    if root.join(".git").exists() && !root.join(crate::new::DEPLOY_WORKFLOW).is_file() {
+    let root = r.cfg.root.clone();
+    if !root.join(".git").exists() {
+        return;
+    }
+    if !root.join(crate::new::DEPLOY_WORKFLOW).is_file() {
         r.warn(
-            "no .github/workflows/deploy.yml: nothing deploys a merge, and items dated in the future never go live",
+            "no .github/workflows/deploy.yml: nothing deploys a merge",
             Some(crate::new::DEPLOY_WORKFLOW),
-            Some("run `magehat new deploy` for the standard workflow and add the CLOUDFLARE_API_TOKEN secret (Deploy in `magehat -h`)"),
+            Some("run `magehat new deploy` for the standard workflows and add the CLOUDFLARE_API_TOKEN secret (Deploy in `magehat -h`)"),
+        );
+    }
+    if !r.scheduled.is_empty() && !root.join(crate::new::DRIP_WORKFLOW).is_file() {
+        let n = r.scheduled.len();
+        r.warn(
+            format!("{n} scheduled item{} but no .github/workflows/drip.yml, so {} never go{} live", if n == 1 { "" } else { "s" }, if n == 1 { "it" } else { "they" }, if n == 1 { "es" } else { "" }),
+            Some(crate::new::DRIP_WORKFLOW),
+            Some("run `magehat new deploy`, which writes the daily run (Deploy in `magehat -h`)"),
         );
     }
 }
@@ -384,5 +395,10 @@ pub fn report_json(r: &BuildResult) -> serde_json::Value {
             "file": w.file, "line": w.line, "message": w.message, "fix": w.fix,
         })).collect::<Vec<_>>(),
         "notes": r.notes,
+        // Items the clock put off, soonest first; the deploy workflow reads
+        // this to keep the daily run on only while something is scheduled.
+        "scheduled": r.scheduled.iter().map(|s| json!({
+            "file": s.file, "date": s.date, "due": crate::clock::format_iso(s.at),
+        })).collect::<Vec<_>>(),
     })
 }

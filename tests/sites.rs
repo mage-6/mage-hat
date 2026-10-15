@@ -846,6 +846,20 @@ fn items_dated_in_the_future_wait_for_their_date() {
     assert_eq!(r.scheduled.len(), 1);
     assert_eq!(r.scheduled[0].file, "src/content/posts/next-week.md");
     assert!(r.notes.iter().any(|n| n.contains("1 scheduled item is left out until their date") && n.contains("2026-03-10T00:00:00Z")), "{:?}", r.notes);
+    // The deploy workflow reads the scheduled list from the JSON report.
+    let json = report_json(&r);
+    assert_eq!(json["scheduled"][0]["file"], "src/content/posts/next-week.md");
+    assert_eq!(json["scheduled"][0]["due"], "2026-03-10T00:00:00Z");
+
+    // A repository root with scheduled items needs the daily run.
+    std::fs::create_dir_all(site.join(".git")).unwrap();
+    std::fs::create_dir_all(site.join(".github/workflows")).unwrap();
+    std::fs::write(site.join(".github/workflows/deploy.yml"), "name: deploy\n").unwrap();
+    let r = magehat::check::run_check_with(&site, &Clock::at("2026-03-09").unwrap()).unwrap();
+    assert!(r.warnings.iter().any(|w| w.message.contains("1 scheduled item but no .github/workflows/drip.yml")), "{:?}", r.warnings);
+    std::fs::write(site.join(".github/workflows/drip.yml"), "name: drip\n").unwrap();
+    let r = magehat::check::run_check_with(&site, &Clock::at("2026-03-09").unwrap()).unwrap();
+    assert!(r.warnings.iter().all(|w| !w.message.contains("drip.yml")), "{:?}", r.warnings);
 
     // A date alone is midnight UTC: from then on it is an ordinary item.
     let r = build_site_with(&site, &Clock::at("2026-03-10T00:00:00Z").unwrap()).unwrap();
@@ -874,11 +888,13 @@ fn items_dated_in_the_future_wait_for_their_date() {
 
 #[test]
 fn a_repository_root_carries_the_deploy_workflow() {
-    // init writes it, so a new site at the root of its repository checks clean.
+    // init writes both, so a new site at the root of its repository checks clean.
     let site = scaffold("deploy-workflow");
     std::fs::create_dir_all(site.join(".git")).unwrap();
     let workflow = site.join(".github/workflows/deploy.yml");
-    assert!(std::fs::read_to_string(&workflow).unwrap().contains("robo-kick/mage-hat/.github/workflows/deploy-site.yml"));
+    for f in ["deploy.yml", "drip.yml"] {
+        assert!(std::fs::read_to_string(site.join(".github/workflows").join(f)).unwrap().contains("robo-kick/mage-hat/.github/workflows/deploy-site.yml"), "{f}");
+    }
     let r = run_check(&site).unwrap();
     assert!(r.warnings.is_empty(), "{:?}", r.warnings);
 
@@ -888,9 +904,9 @@ fn a_repository_root_carries_the_deploy_workflow() {
     let w = r.warnings.iter().find(|w| w.message.contains("deploy.yml")).expect("a warning about the missing workflow");
     assert!(w.fix.as_deref().unwrap_or("").contains("magehat new deploy"), "{w}");
 
-    // new deploy writes the same file, once.
+    // new deploy writes what is missing, and nothing when both are there.
     let msg = magehat::new::new(&site, "deploy", &[], None).unwrap();
-    assert!(msg.contains("Created .github/workflows/deploy.yml") && msg.contains("CLOUDFLARE_API_TOKEN"), "{msg}");
+    assert!(msg.contains("Created .github/workflows/deploy.yml") && !msg.contains("drip.yml") && msg.contains("CLOUDFLARE_API_TOKEN"), "{msg}");
     assert!(workflow.is_file());
     assert!(magehat::new::new(&site, "deploy", &[], None).is_err());
     assert!(run_check(&site).unwrap().warnings.is_empty());

@@ -97,7 +97,9 @@ whole document; pages land in the `<slot>`):
     src/assets/fonts/    font files and their stylesheet, saved from a Google Fonts link
     src/media/           one record per file kept in the media bucket (see Media)
     .github/workflows/deploy.yml
-                         the deploy: on push, by hand, and daily (see Deploy)
+                         the deploy: on push to main and by hand (see Deploy)
+    .github/workflows/drip.yml
+                         the daily run for items dated ahead; on only while there are any
 
 `magehat new page <name>`, `new component <name>`, `new item <collection> <id>`
 and `new deploy` create correctly shaped files; prefer them over writing files
@@ -448,18 +450,21 @@ up, and the engines still find changes through the sitemap, only slower.
 
 ## Deploy
 
-    magehat new deploy              .github/workflows/deploy.yml
+    magehat new deploy              .github/workflows/deploy.yml and drip.yml
 
-`magehat init` writes that workflow too. It deploys `dist/` to a Cloudflare
-Worker with static assets (the site's `wrangler.toml` names it) on every push
-to main, by hand from the Actions tab, and once a day, so an item dated in
-the future (see Collections) goes live on its date with nobody deploying.
-The steps, `check`, `build`, `wrangler deploy`, `media prune`, `indexnow`,
-live in the MageHat repository and every site runs the current ones, like
-the binary itself. The daily run deploys only when its build differs from
-the live sitemap, so an unchanged site costs one runner minute a day and no
-deploy. One repository secret, `CLOUDFLARE_API_TOKEN`: Workers Scripts edit
-on the site's account, plus R2 edit when the site has `[media]`.
+`magehat init` writes both. `deploy.yml` deploys `dist/` to a Cloudflare
+Worker with static assets (the site's `wrangler.toml` names it) on every
+push to main and by hand from the Actions tab. `drip.yml` is the daily run
+that publishes items dated in the future (see Collections) on their date
+with nobody deploying: it deploys only when its build differs from the live
+sitemap, and it is switched on by any deploy whose build put items off and
+off again by the deploy that publishes the last of them, so a site with
+nothing scheduled runs nothing. The steps, `check`, `build`, `wrangler
+deploy`, `media prune`, `indexnow` and that switch, live in the MageHat
+repository and every site runs the current ones, like the binary itself.
+One repository secret, `CLOUDFLARE_API_TOKEN`: Workers Scripts edit on the
+site's account, plus R2 edit when the site has `[media]`. The workflows
+grant `actions: write` to their own token for the switch; nothing else.
 
 GitHub starts a schedule minutes to hours late and may skip one under load;
 whatever was due is published by the next run, so a date promises the day,
@@ -467,7 +472,9 @@ never the hour. Something that must go live at an exact time is merged at
 that time, which deploys within a minute. A site inside a larger repository
 calls the same workflow from that repository's `.github/workflows/` with
 `with: site: <folder>`. `check` warns when a site at the root of its own
-repository has no deploy workflow.
+repository has no `deploy.yml`, and when it has scheduled items but no
+`drip.yml`. `build --json` lists the scheduled items as `scheduled`, each
+with its `file`, `date` and `due` moment in UTC.
 
 ## Analytics
 
@@ -511,11 +518,11 @@ the build. Canonical, hreflang, sitemap.xml and robots.txt are generated.
                               translations, broken links and anchors, missing
                               title, description or alt text, duplicate ids,
                               a relative social image, fonts still on Google,
-                              no deploy workflow
+                              a missing deploy or drip workflow
     magehat build [--json]    write dist/, without items dated in the future
     magehat new ...           page <name> | component <name> | item <coll> <id>
                               (--lang xx for a translation of a page or item)
-                              | deploy (the workflow, see Deploy)
+                              | deploy (the two workflows, see Deploy)
     magehat add [name]        list the ready-made components, or copy one in
     magehat dev [--port N]    local server with live reload; scheduled items shown
     --now <iso>               on check, build or dev: run the clock at that

@@ -11,6 +11,7 @@ const SCAFFOLD: &[(&str, &str)] = &[
     ("site.toml", include_str!("../scaffold/site.toml")),
     (".gitignore", include_str!("../scaffold/_gitignore")),
     (".github/workflows/deploy.yml", DEPLOY_WORKFLOW_TEMPLATE),
+    (".github/workflows/drip.yml", DRIP_WORKFLOW_TEMPLATE),
     ("src/assets/favicon.svg", include_str!("../scaffold/src/assets/favicon.svg")),
     ("src/assets/site.css", include_str!("../scaffold/src/assets/site.css")),
     ("src/components/base.html", include_str!("../scaffold/src/components/base.html")),
@@ -35,9 +36,11 @@ const SCAFFOLD: &[(&str, &str)] = &[
     ("src/pages/tags/[tag].html", include_str!("../scaffold/src/pages/tags/[tag].html")),
 ];
 
-/// The deploy workflow every site carries; `magehat new deploy` writes the
-/// same file into an existing site (Deploy in the manual).
+/// The two workflows every site carries, deploy on push and the daily run
+/// for scheduled items; `magehat new deploy` writes the same files into an
+/// existing site (Deploy in the manual).
 pub const DEPLOY_WORKFLOW_TEMPLATE: &str = include_str!("../scaffold/_github/workflows/deploy.yml");
+pub const DRIP_WORKFLOW_TEMPLATE: &str = include_str!("../scaffold/_github/workflows/drip.yml");
 
 const SCAFFOLD_BINARY: &[(&str, &[u8])] = &[
     ("src/assets/photos/hat.jpg", include_bytes!("../scaffold/src/assets/photos/hat.jpg")),

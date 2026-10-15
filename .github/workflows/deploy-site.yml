@@ -1,11 +1,12 @@
 # The deploy every MageHat site runs, called from the site's own
-# .github/workflows/deploy.yml (written by `magehat init` or `magehat new
-# deploy`): check, build, `wrangler deploy`, `media prune`, `indexnow`.
+# .github/workflows/deploy.yml (push, manual) and drip.yml (daily), both
+# written by `magehat init` or `magehat new deploy`: check, build, `wrangler
+# deploy`, `media prune`, `indexnow`.
 #
-# A scheduled run deploys only when its build differs from the live sitemap.
-# That is how an item dated in the future goes live on its date (Collections
-# in the manual) while an unchanged site costs one runner minute a day and
-# never a deploy. Pushes and manual runs always deploy.
+# Items dated ahead (Collections in the manual) go live through drip.yml. A
+# scheduled run deploys only when its build differs from the live sitemap,
+# and the last step keeps drip.yml enabled only while the build reports
+# scheduled items, so a site with nothing pending runs nothing at all.
 name: deploy-site
 on:
   workflow_call:
@@ -37,10 +38,12 @@ jobs:
           "$RUNNER_TEMP/magehat-linux-x64/magehat" --version
 
       # A broken link or an undefined variable fails here rather than shipping.
+      # The build report is kept: the last step reads what was scheduled.
       - name: Check and build
         run: |
           magehat check
-          magehat build
+          magehat build --json > "$RUNNER_TEMP/build.json" || { cat "$RUNNER_TEMP/build.json"; exit 1; }
+          jq -r '"Built \(.pages) pages, \(.scheduled | length) scheduled"' "$RUNNER_TEMP/build.json"
 
       - name: Compare with the live site
         id: live
@@ -81,3 +84,24 @@ jobs:
         if: steps.live.outputs.changed != 'false'
         run: magehat indexnow
         continue-on-error: true
+
+      # The daily run exists only while something is scheduled. The callers
+      # grant `actions: write` for this; a site without drip.yml is told when
+      # that matters.
+      - name: Keep the daily run only while items are scheduled
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          n=$(jq '.scheduled | length' "$RUNNER_TEMP/build.json")
+          if ! gh workflow view drip.yml > /dev/null 2>&1; then
+            if [ "$n" != 0 ]; then
+              echo "::warning::$n scheduled items but no .github/workflows/drip.yml, so they never go live: run magehat new deploy"
+            fi
+          elif [ "$n" = 0 ]; then
+            gh workflow disable drip.yml
+            echo "Nothing scheduled: the daily run is off"
+          else
+            gh workflow enable drip.yml
+            echo "$n scheduled, the next due $(jq -r '.scheduled[0].due' "$RUNNER_TEMP/build.json"): the daily run is on"
+          fi

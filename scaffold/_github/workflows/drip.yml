@@ -1,0 +1,22 @@
+# The daily run that publishes items dated ahead (Collections in `magehat -h`).
+# It deploys only when its build differs from the live site, and it exists
+# only while something is scheduled: every deploy, this one included, switches
+# it on when the build put items off and off when none are left, so a site
+# with nothing pending runs nothing. GitHub starts a schedule minutes to hours
+# late and may skip one under load; the next run publishes whatever was due,
+# so a date promises the day, never the hour. Deploy in `magehat -h`.
+name: drip
+on:
+  schedule:
+    - cron: "23 6 * * *"
+permissions:
+  contents: read
+  actions: write
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    uses: robo-kick/mage-hat/.github/workflows/deploy-site.yml@main
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
