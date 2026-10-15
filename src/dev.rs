@@ -1,5 +1,8 @@
-//! `magehat dev`: build, serve dist/, rebuild when src changes, reload the
-//! browser. A polling watcher and a small HTTP server; nothing to configure.
+//! `magehat dev`: build, serve dist/, rebuild when a source file changes,
+//! reload the browser. A polling watcher and a small HTTP server; nothing to
+//! configure. Watched: site.toml, src/, and the folders outside src that
+//! site.toml joins in through [assets] and [icons], so a shared brand kit or
+//! tool edited in place reloads like anything else.
 
 use crate::build::{build_site_with, write_outputs};
 use crate::clock::Clock;
@@ -61,9 +64,17 @@ fn snapshot(root: &Path) -> BTreeMap<String, SystemTime> {
     if let Ok(m) = std::fs::metadata(&site) {
         snap.insert("site.toml".into(), m.modified().unwrap_or(SystemTime::UNIX_EPOCH));
     }
-    for (path, rel) in walk_files(root, &root.join("src")) {
-        if let Ok(m) = std::fs::metadata(&path) {
-            snap.insert(rel, m.modified().unwrap_or(SystemTime::UNIX_EPOCH));
+    let mut dirs = vec![root.join("src")];
+    // A site.toml that does not parse is reported by the build; here it just
+    // means no extra folders to watch until it is fixed.
+    if let Ok(cfg) = crate::config::load_config(root) {
+        dirs.extend(cfg.assets.values().chain(cfg.icons.values()).map(|p| root.join(p)));
+    }
+    for dir in dirs {
+        for (path, rel) in walk_files(root, &dir) {
+            if let Ok(m) = std::fs::metadata(&path) {
+                snap.insert(rel, m.modified().unwrap_or(SystemTime::UNIX_EPOCH));
+            }
         }
     }
     snap
@@ -172,4 +183,29 @@ pub fn serve(root: &Path, port: u16, clock: Clock) -> crate::errors::Result<()> 
         handle(request, &dist, &state);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_watcher_sees_folders_joined_through_assets_and_icons() {
+        let dir = std::env::temp_dir().join(format!("magehat-dev-watch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let site = dir.join("site");
+        crate::init::init_site(&site).unwrap();
+        let shared = dir.join("shared");
+        std::fs::create_dir_all(shared.join("svg")).unwrap();
+        std::fs::write(shared.join("paint.js"), "// tool").unwrap();
+        std::fs::write(shared.join("svg/logo.svg"), "<svg/>").unwrap();
+        let toml = std::fs::read_to_string(site.join("site.toml")).unwrap();
+        std::fs::write(site.join("site.toml"), format!("{toml}\n[assets]\nshared = \"../shared\"\n[icons]\nbrand = \"../shared/svg\"\n")).unwrap();
+
+        let snap = snapshot(&site);
+        assert!(snap.keys().any(|k| k.ends_with("paint.js")), "{:?}", snap.keys().collect::<Vec<_>>());
+        assert!(snap.keys().any(|k| k.ends_with("logo.svg")));
+        assert!(snap.contains_key("src/pages/index.html") && snap.contains_key("site.toml"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

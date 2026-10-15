@@ -22,8 +22,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 pub const ASSET_DIR: &str = "_mh";
-/// Where a page's head points for the component stylesheet before it is hashed.
+/// Where a page's head points for the site stylesheet before it is hashed.
 const COMPONENT_CSS: &str = "_mh/components.css";
+
+/// Rules the build itself needs, ahead of the component CSS in the same file.
+/// The <picture> MageHat wraps an <img> in (images.rs) must not become the
+/// flex or grid item in the author's place, the same reason component
+/// wrappers get display: contents.
+const BASE_CSS: &str = "picture[data-mh]{display:contents}";
 
 #[derive(Debug, Clone)]
 pub struct BuiltPage {
@@ -872,8 +878,10 @@ impl<'r> Builder<'r> {
         let mut page = Map::new();
         page.insert("title".into(), Value::Null);
         page.insert("description".into(), Value::Null);
+        // An item page's metadata is the item's, so its social image is the
+        // item's cover; the template's own <meta> below still wins.
         if let Some(item) = &item {
-            for key in ["title", "description", "date"] {
+            for key in ["title", "description", "date", "image"] {
                 page.insert(key.into(), item.get(key).cloned().unwrap_or(Value::Null));
             }
         }
@@ -934,13 +942,11 @@ impl<'r> Builder<'r> {
             let robots = robots.unwrap_or("max-image-preview:large");
             lines.push(format!("<meta name=\"robots\" content=\"{}\">", crate::values::escape_attr_str(robots)));
         }
-        // One stylesheet for every component on the site (write_component_assets),
-        // not one per component: each <link> blocks the first paint. The hashed
-        // name is only known once every page is rendered, so finish_pages
-        // rewrites this address to it.
-        if used.iter().any(|tag| !self.r.components[tag].style.is_empty()) {
-            lines.push(format!("<link rel=\"stylesheet\" href=\"/{COMPONENT_CSS}\">"));
-        }
+        // One stylesheet for the build's own rules and every component on the
+        // site (write_component_assets), not one per component: each <link>
+        // blocks the first paint. The hashed name is only known once every
+        // page is rendered, so finish_pages rewrites this address to it.
+        lines.push(format!("<link rel=\"stylesheet\" href=\"/{COMPONENT_CSS}\">"));
         for tag in used {
             let comp = &self.r.components[tag];
             if !comp.script.is_empty() {
@@ -979,13 +985,12 @@ impl<'r> Builder<'r> {
     /// order the site first uses them, under its hashed name; and each
     /// component's script.
     fn write_component_assets(&mut self) {
-        let css: Vec<String> = self.used_all.iter().map(|t| &self.r.components[t]).filter(|c| !c.style.is_empty()).map(|c| self.css_text(c)).collect();
-        if !css.is_empty() {
-            let css = css.join("\n");
-            let name = format!("{ASSET_DIR}/components.{}.css", digest(&css));
-            self.r.outputs.insert(name.clone(), css.into_bytes());
-            self.asset_map.insert(COMPONENT_CSS.to_string(), name);
-        }
+        let mut css: Vec<String> = vec![BASE_CSS.to_string()];
+        css.extend(self.used_all.iter().map(|t| &self.r.components[t]).filter(|c| !c.style.is_empty()).map(|c| self.css_text(c)));
+        let css = css.join("\n");
+        let name = format!("{ASSET_DIR}/components.{}.css", digest(&css));
+        self.r.outputs.insert(name.clone(), css.into_bytes());
+        self.asset_map.insert(COMPONENT_CSS.to_string(), name);
         for tag in self.used_all.clone() {
             let comp = self.r.components[&tag].clone();
             if !comp.script.is_empty() {

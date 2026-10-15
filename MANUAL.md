@@ -32,6 +32,7 @@ Open a new terminal afterwards, then check it answers:
     magehat dev
 
 `dev` serves the site on http://localhost:8080, rebuilds when a file changes
+(under `src/`, `site.toml`, or a folder joined in through `[assets]` or `[icons]`)
 and reloads the browser. Edit `src/pages/index.html` and watch it update.
 When the site is ready:
 
@@ -246,7 +247,8 @@ there are none:
 
 List items with `each="post in blog"`. Item pages come from
 `src/pages/blog/[post].html`, which receives the item as `post` and takes
-`page.title` and `page.description` from it:
+`page.title`, `page.description`, `page.date` and `page.image` from it (so
+the social image is the item's; a `<meta>` of the template's own still wins):
 
     <x-base>
       <article>
@@ -326,9 +328,8 @@ already marks an image `fetchpriority="high"`, has chosen its hero, and
 nothing else is promoted. Give a hero a `width` near its displayed size, or every visitor
 downloads the full original. An `<img>` you put
 inside your own `<picture>` is left alone. The `<picture>` MageHat adds is
-what a flex or grid layout sizes, so an image beside text needs
-`picture { flex: none; }` and `max-width: none` on the `<img>`, or the row
-squeezes it out of shape. Every asset also gets a
+`display: contents`, so the `<img>` stays the flex or grid item you laid
+out; style the `<img>`, never the wrapper. Every asset also gets a
 content-hashed copy under `/_mh/a/` and references are rewritten to it; keep
 writing the plain path. Everything MageHat writes under `/_mh/` has a hashed
 name, so the build adds a rule to `_headers` that lets browsers keep it for

@@ -176,7 +176,11 @@ impl<'a> Images<'a> {
             }
         }
         source.push('>');
-        Some(format!("<picture>{source}{img}</picture>"))
+        // `data-mh` marks the wrapper as MageHat's: the site stylesheet gives
+        // it display: contents (BASE_CSS in build.rs), so the <img> stays the
+        // flex or grid item the author laid out. An authored <picture> is
+        // not marked and keeps its box.
+        Some(format!("<picture data-mh>{source}{img}</picture>"))
     }
 
     /// Variants of an image under src/assets: 1x and 2x of the display width,

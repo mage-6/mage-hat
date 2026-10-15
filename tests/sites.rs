@@ -130,7 +130,7 @@ fn images_get_picture_sources_and_variants() {
     let r = build_site(&site).unwrap();
     assert!(r.errors.is_empty(), "{:?}", r.errors);
     let about = text(&r, "about/index.html");
-    let start = about.find("<picture>").expect("picture element");
+    let start = about.find("<picture data-mh>").expect("picture element");
     let picture = &about[start..about[start..].find("</picture>").unwrap() + start];
     assert!(picture.contains("<source type=\"image/webp\" srcset=\"/_mh/img/hat."), "{picture}");
     assert!(picture.contains(".600.webp 600w, /_mh/img/hat.") && picture.contains(".1200.webp 1200w\""), "{picture}");
@@ -826,6 +826,39 @@ image: /covers/dlc.jpg", 1)).unwrap();
 }
 
 #[test]
+fn an_item_page_takes_the_item_image_unless_the_template_says_otherwise() {
+    let site = scaffold("item-image");
+    let post = site.join("src/content/blog/hello-world.md");
+    let body = std::fs::read_to_string(&post).unwrap();
+    std::fs::write(&post, body.replacen("date: 2026-01-15", "date: 2026-01-15\nimage: /favicon.svg", 1)).unwrap();
+    let r = build_site(&site).unwrap();
+    assert!(r.ok(), "{:?}", r.errors);
+    let page = text(&r, "blog/hello-world/index.html");
+    assert!(page.contains("property=\"og:image\" content=\"https://example.com/favicon.svg\""), "{page}");
+    // An item without one falls back to the site image (/photos/hat.jpg in the sample), as before.
+    let other = text(&r, "blog/second-post/index.html");
+    assert!(other.contains("property=\"og:image\" content=\"https://example.com/photos/hat.jpg\""), "{other}");
+    // The template's own <meta name="image"> wins over the item's.
+    let template = site.join("src/pages/blog/[post].html");
+    let t = std::fs::read_to_string(&template).unwrap();
+    std::fs::write(&template, format!("<meta name=\"image\" content=\"/og-posts.png\">\n{t}")).unwrap();
+    let r = build_site(&site).unwrap();
+    assert!(text(&r, "blog/hello-world/index.html").contains("og:image\" content=\"https://example.com/og-posts.png\""));
+}
+
+#[test]
+fn the_picture_wrapper_is_marked_and_layout_transparent() {
+    let r = build_site(&scaffold("picture-wrapper")).unwrap();
+    assert!(r.ok(), "{:?}", r.errors);
+    let (name, css) = r.outputs.iter().find(|(k, _)| k.starts_with("_mh/components.") && k.ends_with(".css")).expect("the site stylesheet");
+    let css = String::from_utf8_lossy(css);
+    assert!(css.starts_with("picture[data-mh]{display:contents}"), "{css}");
+    let about = text(&r, "about/index.html");
+    assert!(about.contains("<picture data-mh>"), "{about}");
+    assert!(about.contains(&format!("href=\"/{name}\"")), "the page links the stylesheet by its hashed name: {about}");
+}
+
+#[test]
 fn items_dated_in_the_future_wait_for_their_date() {
     let site = news("scheduled");
     std::fs::write(
@@ -968,7 +1001,7 @@ fn media_files_are_addressed_in_the_bucket_from_their_records() {
     let html = text(&r, "m/index.html");
     let m = "https://media.example.com/cover.abcdef0123";
     assert!(
-        html.contains(&format!("<picture><source type=\"image/webp\" srcset=\"{m}.400.webp 400w, {m}.800.webp 800w, {m}.1200.webp 1200w, {m}.1600.webp 1600w\" sizes=\"(max-width: 800px) 100vw, 800px\">")),
+        html.contains(&format!("<picture data-mh><source type=\"image/webp\" srcset=\"{m}.400.webp 400w, {m}.800.webp 800w, {m}.1200.webp 1200w, {m}.1600.webp 1600w\" sizes=\"(max-width: 800px) 100vw, 800px\">")),
         "{html}"
     );
     assert!(html.contains(&format!("<img src=\"{m}.800.jpg\" width=\"800\" height=\"450\" srcset=\"{m}.400.jpg 400w, {m}.800.jpg 800w, {m}.1200.jpg 1200w, {m}.1600.jpg 1600w\"")), "{html}");

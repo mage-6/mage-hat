@@ -17,6 +17,7 @@ links:
 - Printing an undefined variable is an error, testing it with `if` is not, and `a or b` treats a missing `a` as false (that is how a default is written)
 - A literal `href="/x/"` is localized per language; interpolated hrefs are not
 - Component CSS is scoped with native `@scope`, the wrapper element is kept in the output with `display: contents`
+- The `<picture>` the build wraps an `<img>` in is marked `data-mh` and given `display: contents` by a rule the site stylesheet always carries, so the `<img>` stays the flex or grid item; an authored `<picture>` is unmarked and keeps its box
 - Layout styles do not reach into components; global CSS lives in `src/assets`, layered tokens, elements, variants
 - Content files are flat (`id.md`, `id.pt-BR.md`); sub-folders are an error with a rename hint
 - Components must wrap their markup in `<template>`; anything else at top level is an error
