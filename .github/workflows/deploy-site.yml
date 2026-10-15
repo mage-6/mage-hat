@@ -26,7 +26,7 @@ jobs:
       run:
         working-directory: ${{ inputs.site }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Always the current release, so a MageHat fix reaches every site at its
       # next deploy. One static binary: no Node toolchain, nothing that expires.
@@ -55,7 +55,7 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         if: steps.live.outputs.changed != 'false'
         with:
           version: 10
