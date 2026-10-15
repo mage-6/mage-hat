@@ -59,15 +59,17 @@ struct Args {
     port: u16,
     lang: Option<String>,
     dry_run: bool,
+    raw: bool,
 }
 
 fn parse_args(argv: &[String]) -> Result<Args> {
-    let mut args = Args { command: String::new(), positional: Vec::new(), json: false, port: 8080, lang: None, dry_run: false };
+    let mut args = Args { command: String::new(), positional: Vec::new(), json: false, port: 8080, lang: None, dry_run: false, raw: false };
     let mut it = argv.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
             "--json" => args.json = true,
             "--dry-run" => args.dry_run = true,
+            "--raw" => args.raw = true,
             "--port" => {
                 let v = it.next().ok_or_else(|| MageError::new("--port needs a number"))?;
                 args.port = v.parse().map_err(|_| MageError::new(format!("--port needs a number, got {v:?}")))?;
@@ -209,11 +211,11 @@ fn run(argv: &[String]) -> Result<i32> {
         }
         "media" => {
             let root = site_root()?;
-            let usage = "magehat media add <file> [name], or magehat media prune [--dry-run]";
+            let usage = "magehat media add <file> [name] [--raw], or magehat media prune [--dry-run]";
             match args.positional.first().map(String::as_str) {
                 Some("add") => {
                     let file = args.positional.get(1).ok_or_else(|| MageError::new("media add needs the file to upload").fix(usage))?;
-                    println!("{}", crate::media::add(&root, file, args.positional.get(2).map(String::as_str))?);
+                    println!("{}", crate::media::add(&root, file, args.positional.get(2).map(String::as_str), args.raw)?);
                     Ok(0)
                 }
                 Some("prune") => {

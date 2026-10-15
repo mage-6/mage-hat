@@ -337,7 +337,10 @@ source, then the source itself), every variant is uploaded under a
 content-hashed name, and `src/media/<name>.json` is written with what the
 build needs: type, hash, size, width, height, widths. Commit the record; the
 original never enters the repository. Any other file (video, audio, a PDF)
-is uploaded as it is. The name defaults to the file's stem, lowercased;
+is uploaded as it is, and so is an image added with `--raw`: one whose pixels
+are data a script reads (a map, a lookup table) and must arrive byte for byte.
+A raw image has no variants, so an `<img>` cannot show it; `href` and `data-`
+attributes can point at it. The name defaults to the file's stem, lowercased;
 give one when the stem is generic ("cover"). A name already taken by a
 different file is an error: delete the record to replace it.
 
@@ -481,9 +484,10 @@ the build. Canonical, hreflang, sitemap.xml and robots.txt are generated.
     magehat init [dir]        sample site with a page, layout, post and image
     magehat clean             remove dist/ and the image cache
     magehat indexnow          after a deploy, submit the live sitemap to IndexNow
-    magehat media add <file> [name]
+    magehat media add <file> [name] [--raw]
                               encode and upload a cover or a video to the media
-                              bucket and write its record under src/media/
+                              bucket and write its record under src/media/;
+                              --raw sends an image byte for byte, no variants
     magehat media prune [--dry-run]
                               after a deploy, delete bucket objects no record names
     magehat -v, -V, --version print the version on its own

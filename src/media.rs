@@ -29,7 +29,6 @@ use indexmap::IndexMap;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::LazyLock;
 
 pub const DIR: &str = "src/media";
 pub const PREFIX: &str = "media:";
@@ -245,8 +244,8 @@ fn mime_for(ext: &str) -> &'static str {
     }
 }
 
-/// `magehat media add <file> [name]`: encode, upload, write the record.
-pub fn add(root: &Path, file: &str, name: Option<&str>) -> Result<String> {
+/// `magehat media add <file> [name] [--raw]`: encode, upload, write the record.
+pub fn add(root: &Path, file: &str, name: Option<&str>, raw: bool) -> Result<String> {
     let (media, token) = require(root)?;
     let path = Path::new(file);
     let bytes = std::fs::read(path).map_err(|e| MageError::new(format!("cannot read {file}: {e}")))?;
@@ -276,8 +275,9 @@ pub fn add(root: &Path, file: &str, name: Option<&str>) -> Result<String> {
         }
     }
 
-    // An image gets the ladder; anything else goes up as it is.
-    let fmt = Fmt::from_key(&format!("x.{ext}"));
+    // An image gets the ladder; anything else goes up as it is, and so does an image added
+    // --raw: its pixels are data a script reads (a map, a lookup table), not a picture to show.
+    let fmt = if raw { None } else { Fmt::from_key(&format!("x.{ext}")) };
     let image = fmt.and_then(|f| {
         let (w, h) = image::ImageReader::new(std::io::Cursor::new(&bytes)).with_guessed_format().ok()?.into_dimensions().ok()?;
         (w > 0 && h > 0).then_some((f, w, h))
