@@ -87,21 +87,23 @@ jobs:
 
       # The daily run exists only while something is scheduled. The callers
       # grant `actions: write` for this; a site without drip.yml is told when
-      # that matters.
+      # that matters. GitHub refuses to disable a workflow that is already
+      # off (403), so the state is read first and only a change is sent.
       - name: Keep the daily run only while items are scheduled
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           n=$(jq '.scheduled | length' "$RUNNER_TEMP/build.json")
-          if ! gh workflow view drip.yml > /dev/null 2>&1; then
+          state=$(gh api "repos/$GH_REPO/actions/workflows/drip.yml" --jq .state 2> /dev/null || echo missing)
+          if [ "$state" = missing ]; then
             if [ "$n" != 0 ]; then
               echo "::warning::$n scheduled items but no .github/workflows/drip.yml, so they never go live: run magehat new deploy"
             fi
           elif [ "$n" = 0 ]; then
-            gh workflow disable drip.yml
+            if [ "$state" = active ]; then gh workflow disable drip.yml; fi
             echo "Nothing scheduled: the daily run is off"
           else
-            gh workflow enable drip.yml
+            if [ "$state" != active ]; then gh workflow enable drip.yml; fi
             echo "$n scheduled, the next due $(jq -r '.scheduled[0].due' "$RUNNER_TEMP/build.json"): the daily run is on"
           fi
