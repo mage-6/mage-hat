@@ -44,4 +44,5 @@ links:
 - Item h2 and h3 headings get an id slugged by the archive-term rule (one slug rule) and the item exposes them as `toc`; Markdown's `{#id}` heading attributes stay off because the dialect is frozen, so an author's own id is a raw HTML heading. Ids are unique within an item; a page that renders several bodies or reuses a heading's id elsewhere is caught by `check`'s duplicate-id warning
 
 ## Open questions
+- Scale, measured 2026-10-15: a full build is about 1.4 ms a page (20,000 stories in 28 s), so builds are not the ceiling. In order of arrival: Cloudflare's files per Worker version (20,000 on Workers Free, 100,000 on Paid) caps a site near 15,000 or 80,000 stories; past 50,000 URLs the single sitemap.xml needs a sitemap index and `indexnow` should submit only changed URLs. Nothing to do until a site nears 10,000 pages
 - Should missing translation keys fall back to the default language instead of failing the build?
