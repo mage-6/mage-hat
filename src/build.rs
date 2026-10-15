@@ -254,6 +254,9 @@ struct Builder<'r> {
     asset_map: crate::assets::AssetMap,
     icons: crate::icons::Icons,
     fonts: crate::fonts::Fonts,
+    scheduled_links: crate::scheduled_links::ScheduledLinks,
+    /// Links on pages that point at a scheduled item, written as text.
+    unlinked: usize,
 }
 
 impl<'r> Builder<'r> {
@@ -271,8 +274,11 @@ impl<'r> Builder<'r> {
             asset_map: crate::assets::AssetMap::new(),
             icons,
             fonts,
+            scheduled_links: Default::default(),
+            unlinked: 0,
         };
         b.find_item_pages();
+        b.plan_scheduled_links();
         b.build_item_dicts();
         b.build_terms();
         let instances = b.plan_instances();
@@ -352,11 +358,33 @@ impl<'r> Builder<'r> {
         }
     }
 
-    /// Point every page at hashed assets, then minify.
+    /// The addresses scheduled items will have. Empty when the clock shows
+    /// them (dev), since their pages are built then.
+    fn plan_scheduled_links(&mut self) {
+        if self.r.clock.show_scheduled {
+            return;
+        }
+        let paths: Vec<String> = self
+            .r
+            .scheduled
+            .iter()
+            .filter_map(|s| {
+                let (identity, _) = self.item_pages.get(&s.collection)?;
+                resolve(&self.r.sources, identity, &s.lang, &self.r.cfg)?;
+                Some(page_url(&self.r.cfg, identity, &s.lang, Some(&s.slug)))
+            })
+            .collect();
+        self.scheduled_links = crate::scheduled_links::ScheduledLinks::new(paths, &self.r.cfg.url);
+    }
+
+    /// Write links to scheduled items as text, point every page at hashed
+    /// assets, then minify.
     fn finish_pages(&mut self) {
         let pages: Vec<String> = self.r.pages.iter().map(|p| p.out.clone()).collect();
         for out in pages {
             let html = String::from_utf8_lossy(&self.r.outputs[&out]).to_string();
+            let (html, n) = self.scheduled_links.unlink(&html);
+            self.unlinked += n;
             let html = crate::assets::rewrite_html(&html, &out, &self.asset_map);
             self.r.outputs.insert(out, crate::minify::html(&html).into_bytes());
         }
@@ -1052,7 +1080,8 @@ impl<'r> Builder<'r> {
                         date,
                         author: d.get("author").map(to_text).filter(|s| !s.is_empty()),
                         image: d.get("image").map(to_text).and_then(|s| self.feed_image(&s)),
-                        text: d.get("description").map(to_text).filter(|s| !s.is_empty()).unwrap_or_else(|| d.get("body").map(to_text).unwrap_or_default()),
+                        text: d.get("description").map(to_text).filter(|s| !s.is_empty())
+                            .unwrap_or_else(|| self.scheduled_links.unlink(&d.get("body").map(to_text).unwrap_or_default()).0),
                     });
                 }
                 if items.is_empty() {
@@ -1114,11 +1143,15 @@ impl<'r> Builder<'r> {
         }
         let items = if n == 1 { "item is" } else { "items are" };
         let next = &self.r.scheduled[0];
-        let note = if self.r.clock.show_scheduled {
+        let mut note = if self.r.clock.show_scheduled {
             format!("{n} scheduled {items} shown with scheduled: true; `magehat build` leaves them out until their date (the first, {}, is due {})", next.file, format_iso(next.at))
         } else {
             format!("{n} scheduled {items} left out until their date; the next, {}, is due {}", next.file, format_iso(next.at))
         };
+        if self.unlinked > 0 {
+            let links = if self.unlinked == 1 { "link" } else { "links" };
+            note.push_str(&format!("; {} {links} to them shown as text until then", self.unlinked));
+        }
         self.r.notes.push(note);
     }
 

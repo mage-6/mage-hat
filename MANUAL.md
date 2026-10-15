@@ -221,7 +221,10 @@ An item whose `date` is still to come is scheduled: `build` leaves it out,
 page, lists, feed and sitemaps alike, until a build on or after that date.
 Nothing else to set, and that is how content is dripped: write the items,
 date them over the coming weeks, merge; the daily deploy (see Deploy)
-publishes each on its day. Dates are ISO 8601 and a date alone means
+publishes each on its day. Items may link to each other ahead of time: a
+link to an item still scheduled is written as its text, on pages and in
+the feed, and becomes a link in the first build on or after that item's
+date. Dates are ISO 8601 and a date alone means
 midnight UTC, so a time with its offset (`2026-10-20T09:00:00-03:00`) says
 when exactly. `dev` shows scheduled items anyway, each with
 `scheduled: true`, so a story can be read before its date; `check` and

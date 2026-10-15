@@ -32,6 +32,7 @@ pub mod minify;
 pub mod new;
 pub mod pages;
 pub mod render;
+pub mod scheduled_links;
 pub mod seo;
 pub mod toc;
 pub mod values;

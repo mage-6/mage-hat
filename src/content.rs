@@ -56,6 +56,8 @@ pub struct Scheduled {
     pub id: String,
     pub lang: String,
     pub file: String,
+    /// Where its page will be, so links to it can wait too (scheduled_links.rs).
+    pub slug: String,
     /// The date as written.
     pub date: String,
     /// The same moment in seconds since the epoch.
@@ -113,6 +115,7 @@ pub fn load_collections(cfg: &Config, clock: &Clock) -> Result<(Collections, Vec
                     id: item.id.clone(),
                     lang: item.lang.clone(),
                     file: rel.clone(),
+                    slug: item.slug(),
                     date: to_text(&item.meta["date"]),
                     at,
                 });

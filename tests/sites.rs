@@ -835,6 +835,10 @@ fn items_dated_in_the_future_wait_for_their_date() {
     .unwrap();
     let toml = std::fs::read_to_string(site.join("site.toml")).unwrap();
     std::fs::write(site.join("site.toml"), format!("{toml}\n[collections.posts]\nfeed = true\n")).unwrap();
+    // A published story that already links to it.
+    let live = site.join("src/content/posts/hollow-knight.md");
+    let body = std::fs::read_to_string(&live).unwrap();
+    std::fs::write(&live, format!("{}\nRead [what comes next](/posts/next-week/#plan) soon.\n", body.trim_end())).unwrap();
 
     // Before its date: no page, not in the list, the feed or the sitemap, and the build says so.
     let r = build_site_with(&site, &Clock::at("2026-03-09T23:59:59Z").unwrap()).unwrap();
@@ -846,6 +850,12 @@ fn items_dated_in_the_future_wait_for_their_date() {
     assert_eq!(r.scheduled.len(), 1);
     assert_eq!(r.scheduled[0].file, "src/content/posts/next-week.md");
     assert!(r.notes.iter().any(|n| n.contains("1 scheduled item is left out until their date") && n.contains("2026-03-10T00:00:00Z")), "{:?}", r.notes);
+    // A link to it reads as text until then, so the live page has no 404 in it.
+    let page = text(&r, "posts/hollow-knight/index.html");
+    assert!(page.contains("Read what comes next soon.") && !page.contains("/posts/next-week/"), "{page}");
+    assert!(r.notes.iter().any(|n| n.contains("1 link to them shown as text until then")), "{:?}", r.notes);
+    let checked = magehat::check::run_check_with(&site, &Clock::at("2026-03-09").unwrap()).unwrap();
+    assert!(checked.warnings.iter().all(|w| !w.message.contains("next-week")), "{:?}", checked.warnings);
     // The deploy workflow reads the scheduled list from the JSON report.
     let json = report_json(&r);
     assert_eq!(json["scheduled"][0]["file"], "src/content/posts/next-week.md");
@@ -866,6 +876,7 @@ fn items_dated_in_the_future_wait_for_their_date() {
     assert!(r.outputs.contains_key("posts/next-week/index.html"));
     assert!(text(&r, "posts/index.html").contains("next-week") && text(&r, "sitemap.xml").contains("next-week"));
     assert!(r.scheduled.is_empty() && r.notes.iter().all(|n| !n.contains("scheduled")));
+    assert!(text(&r, "posts/hollow-knight/index.html").contains(r#"<a href="/posts/next-week/#plan">what comes next</a>"#));
 
     // dev shows it early, marked, and says what build will do.
     let r = build_site_with(&site, &Clock::at("2026-03-05").unwrap().showing_scheduled()).unwrap();
