@@ -6,7 +6,8 @@
 
 use crate::components::{digest, load_components, scoped_css, walk_files, Component};
 use crate::config::{load_config, Config};
-use crate::content::{load_collections, split_html_meta, Collections, Item};
+use crate::clock::{format_iso, Clock};
+use crate::content::{load_collections, split_html_meta, Collections, Item, Scheduled};
 use crate::errors::{MageError, Result};
 use crate::htmltree::{parse, Node};
 use crate::pages::{discover_pages, list_url, output_path, page_url, resolve, term_slug, PageSource};
@@ -64,6 +65,10 @@ pub struct BuildResult {
     pub notes: Vec<String>,
     pub components: IndexMap<String, Component>,
     pub collections: Collections,
+    /// The clock this build ran on (clock.rs).
+    pub clock: Clock,
+    /// Items dated after the clock, soonest first (content.rs).
+    pub scheduled: Vec<Scheduled>,
     pub sources: Vec<PageSource>,
     pub i18n: IndexMap<String, Value>,
     pub data: Value,
@@ -90,12 +95,18 @@ impl BuildResult {
     }
 }
 
+/// Build as of now, the wall clock.
 pub fn build_site(root: &Path) -> Result<BuildResult> {
+    build_site_with(root, &Clock::wall())
+}
+
+/// Build as of a clock: `--now` pins it, `dev` shows scheduled items on it.
+pub fn build_site_with(root: &Path, clock: &Clock) -> Result<BuildResult> {
     let cfg = load_config(root)?;
     let components = load_components(root)?;
     let i18n = load_i18n(&cfg)?;
     let data = load_data(&cfg)?;
-    let collections = load_collections(&cfg)?;
+    let (collections, scheduled) = load_collections(&cfg, clock)?;
     let sources = discover_pages(&cfg)?;
     let media = crate::media::load(root)?;
     let mut result = BuildResult {
@@ -107,6 +118,8 @@ pub fn build_site(root: &Path) -> Result<BuildResult> {
         notes: Vec::new(),
         components,
         collections,
+        clock: *clock,
+        scheduled,
         sources,
         i18n,
         data,
@@ -286,6 +299,7 @@ impl<'r> Builder<'r> {
         b.finish_pages();
         b.write_feeds();
         b.write_sitemap_and_robots();
+        b.note_scheduled();
         let own = b.r.outputs.get("_headers").cloned();
         b.r.outputs.insert("_headers".into(), crate::assets::headers(own.as_deref()));
         // Last, so a reference in a feed or in structured data is covered too.
@@ -1091,10 +1105,34 @@ impl<'r> Builder<'r> {
         Some(FeedImage { url, mime: mime.into(), width: None, height: None, length: 0 })
     }
 
+    /// Scheduled items are worth a line: a writer who dated a story next week
+    /// and sees no page should learn why from the build, not from a search.
+    fn note_scheduled(&mut self) {
+        let n = self.r.scheduled.len();
+        if n == 0 {
+            return;
+        }
+        let items = if n == 1 { "item is" } else { "items are" };
+        let next = &self.r.scheduled[0];
+        let note = if self.r.clock.show_scheduled {
+            format!("{n} scheduled {items} shown with scheduled: true; `magehat build` leaves them out until their date (the first, {}, is due {})", next.file, format_iso(next.at))
+        } else {
+            format!("{n} scheduled {items} left out until their date; the next, {}, is due {}", next.file, format_iso(next.at))
+        };
+        self.r.notes.push(note);
+    }
+
+    /// Whether the site asks for a Google News sitemap: `news = true` on a
+    /// collection that exists, and a `url` to put in it.
+    fn news_enabled(&self) -> bool {
+        !self.r.cfg.url.is_empty()
+            && self.r.cfg.collections.iter().any(|(coll, opts)| opts.get("news").and_then(|v| v.as_bool()).unwrap_or(false) && self.r.collections.contains_key(coll))
+    }
+
     /// Google News sitemap entries for collections with `news = true`: items
-    /// dated within two days of the newest one. The build has no clock, so
-    /// the newest story stands in for "today"; a site that publishes news
-    /// deploys when it publishes, and Google ignores entries past two days.
+    /// dated within two days of the build's clock, which is what Google reads
+    /// (it ignores anything older). Empty when the site has been quiet; the
+    /// file is still written, so the address robots.txt names never goes away.
     fn news_entries(&self) -> Vec<NewsEntry> {
         let mut dated: Vec<(u64, NewsEntry)> = Vec::new();
         for (coll, opts) in &self.r.cfg.collections {
@@ -1113,16 +1151,17 @@ impl<'r> Builder<'r> {
                 }
             }
         }
-        let newest = dated.iter().map(|(d, _)| *d).max().unwrap_or(0);
+        let today = self.r.clock.today();
         dated.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.url.cmp(&b.1.url)));
         // Google reads at most 1,000 entries.
-        dated.into_iter().filter(|(d, _)| *d + 2 >= newest).take(1000).map(|(_, e)| e).collect()
+        dated.into_iter().filter(|(d, _)| i64::try_from(*d).map(|d| d + 2 >= today).unwrap_or(false)).take(1000).map(|(_, e)| e).collect()
     }
 
     fn write_sitemap_and_robots(&mut self) {
-        let news = if self.r.cfg.url.is_empty() { Vec::new() } else { self.news_entries() };
+        let news_enabled = self.news_enabled();
+        let news = if news_enabled { self.news_entries() } else { Vec::new() };
         if !self.r.outputs.contains_key("robots.txt") {
-            self.r.outputs.insert("robots.txt".into(), robots_txt(&self.r.cfg.url, !news.is_empty()).into_bytes());
+            self.r.outputs.insert("robots.txt".into(), robots_txt(&self.r.cfg.url, news_enabled).into_bytes());
         }
         if self.r.cfg.url.is_empty() {
             let skipped = if self.r.cfg.indexnow { "sitemap.xml, canonical links and the IndexNow key file skipped" } else { "sitemap.xml and canonical links skipped" };
@@ -1139,7 +1178,7 @@ impl<'r> Builder<'r> {
             .map(|p| SitemapEntry { url: p.url.clone(), lastmod: p.lastmod.clone(), translations: p.translations.clone() })
             .collect();
         self.r.outputs.insert("sitemap.xml".into(), sitemap_xml(&entries, &self.r.cfg.url).into_bytes());
-        if !news.is_empty() {
+        if news_enabled {
             self.r.outputs.insert("news-sitemap.xml".into(), news_sitemap_xml(&news, &self.r.cfg.name, &self.r.cfg.url).into_bytes());
         }
         if !self.r.outputs.contains_key("llms.txt") {

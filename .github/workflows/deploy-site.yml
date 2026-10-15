@@ -1,0 +1,83 @@
+# The deploy every MageHat site runs, called from the site's own
+# .github/workflows/deploy.yml (written by `magehat init` or `magehat new
+# deploy`): check, build, `wrangler deploy`, `media prune`, `indexnow`.
+#
+# A scheduled run deploys only when its build differs from the live sitemap.
+# That is how an item dated in the future goes live on its date (Collections
+# in the manual) while an unchanged site costs one runner minute a day and
+# never a deploy. Pushes and manual runs always deploy.
+name: deploy-site
+on:
+  workflow_call:
+    inputs:
+      site:
+        description: Folder holding site.toml and wrangler.toml, relative to the repository root
+        type: string
+        default: "."
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        description: Workers Scripts edit on the site's account, plus R2 edit when site.toml has [media]
+        required: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ${{ inputs.site }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Always the current release, so a MageHat fix reaches every site at its
+      # next deploy. One static binary: no Node toolchain, nothing that expires.
+      - name: Install MageHat
+        run: |
+          curl -fsSL https://github.com/robo-kick/mage-hat/releases/latest/download/magehat-linux-x64.tar.gz | tar xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/magehat-linux-x64" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/magehat-linux-x64/magehat" --version
+
+      # A broken link or an undefined variable fails here rather than shipping.
+      - name: Check and build
+        run: |
+          magehat check
+          magehat build
+
+      - name: Compare with the live site
+        id: live
+        if: github.event_name == 'schedule'
+        run: |
+          url=$(sed -n 's/^url *= *"\([^"]*\)".*/\1/p' site.toml | head -n 1)
+          if [ -n "$url" ] && curl -fsSL --max-time 30 "$url/sitemap.xml" -o "$RUNNER_TEMP/live-sitemap.xml" \
+             && cmp -s "$RUNNER_TEMP/live-sitemap.xml" dist/sitemap.xml; then
+            echo "Nothing due: the build matches $url/sitemap.xml"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: pnpm/action-setup@v4
+        if: steps.live.outputs.changed != 'false'
+        with:
+          version: 10
+
+      - name: Deploy
+        if: steps.live.outputs.changed != 'false'
+        run: pnpm dlx wrangler@4 deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      # Bucket objects no record names go; a failure here fails the run, which
+      # is the alert, while the deploy above already stands.
+      - name: Prune the media bucket
+        if: steps.live.outputs.changed != 'false'
+        run: |
+          if grep -q '^\[media\]' site.toml; then magehat media prune; else echo "No media bucket"; fi
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      # Tells Bing and the other IndexNow engines which pages changed. The
+      # site is live by now, so a failed ping never fails the deploy.
+      - name: IndexNow
+        if: steps.live.outputs.changed != 'false'
+        run: magehat indexnow
+        continue-on-error: true

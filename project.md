@@ -10,6 +10,7 @@ links:
 ## Decisions
 - Hard boundary: a static-site compiler, never an application framework. No server rendering, auth, databases, API routes, middleware, hydration, framework integrations, plugin system, or arbitrary code in templates. A project that needs those uses another framework
 - Boring, deterministic, tiny, stable: a deliberately small fixed syntax; failing clearly beats producing bad output
+- The build reads the clock for one thing: an item whose `date` is still to come is left out, which is how content is scheduled (a date, never a second field or a publish script); `--now` pins the clock for a reproducible build. The deploy every site runs is the reusable workflow in this repository, called from the `.github/workflows/deploy.yml` that `init` and `new deploy` write, daily so scheduled items go live
 - Agents never edit `dist/`; the loop is edit source, build, check, fix errors
 - `each` and `if` attribute names, not `for`: `for` is a real attribute on `<label>`
 - An unsuffixed page file is the default language only; `[item]` templates are shared by all languages

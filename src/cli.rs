@@ -1,6 +1,7 @@
 //! The magehat command. Argument parsing by hand: a handful of subcommands
-//! and three flags do not justify a dependency.
+//! and a few flags do not justify a dependency.
 
+use crate::clock::Clock;
 use crate::errors::{MageError, Result};
 use std::path::{Path, PathBuf};
 
@@ -60,10 +61,21 @@ struct Args {
     lang: Option<String>,
     dry_run: bool,
     raw: bool,
+    /// `--now <iso>`: the build's clock, instead of the wall clock.
+    now: Option<String>,
+}
+
+impl Args {
+    fn clock(&self) -> Result<Clock> {
+        match &self.now {
+            Some(iso) => Clock::at(iso),
+            None => Ok(Clock::wall()),
+        }
+    }
 }
 
 fn parse_args(argv: &[String]) -> Result<Args> {
-    let mut args = Args { command: String::new(), positional: Vec::new(), json: false, port: 8080, lang: None, dry_run: false, raw: false };
+    let mut args = Args { command: String::new(), positional: Vec::new(), json: false, port: 8080, lang: None, dry_run: false, raw: false, now: None };
     let mut it = argv.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -76,6 +88,9 @@ fn parse_args(argv: &[String]) -> Result<Args> {
             }
             "--lang" => {
                 args.lang = Some(it.next().ok_or_else(|| MageError::new("--lang needs a language code"))?.clone());
+            }
+            "--now" => {
+                args.now = Some(it.next().ok_or_else(|| MageError::new("--now needs a date or timestamp, such as 2026-10-20T14:30:00Z"))?.clone());
             }
             "-h" | "--help" | "help" => args.command = "help".into(),
             "-v" | "-V" | "--version" | "version" => args.command = "version".into(),
@@ -160,7 +175,7 @@ fn run(argv: &[String]) -> Result<i32> {
         },
         "build" => {
             let root = site_root()?;
-            let result = crate::build::build_site(&root)?;
+            let result = crate::build::build_site_with(&root, &args.clock()?)?;
             if result.ok() {
                 crate::build::write_outputs(&result, &result.cfg.dist())?;
             }
@@ -184,7 +199,7 @@ fn run(argv: &[String]) -> Result<i32> {
         }
         "check" => {
             let root = site_root()?;
-            let result = crate::check::run_check(&root)?;
+            let result = crate::check::run_check_with(&root, &args.clock()?)?;
             if args.json {
                 println!("{}", serde_json::to_string_pretty(&crate::check::report_json(&result)).unwrap());
             } else {
@@ -194,7 +209,7 @@ fn run(argv: &[String]) -> Result<i32> {
         }
         "dev" => {
             let root = site_root()?;
-            crate::dev::serve(&root, args.port)?;
+            crate::dev::serve(&root, args.port, args.clock()?)?;
             Ok(0)
         }
         "inspect" => {

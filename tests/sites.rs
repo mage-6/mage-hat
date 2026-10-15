@@ -1,8 +1,9 @@
 //! Whole-site builds: the sample site (byte-for-byte golden), a bilingual
 //! site, images, assets, and the agent-facing error output.
 
-use magehat::build::{build_site, BuildResult};
+use magehat::build::{build_site, build_site_with, BuildResult};
 use magehat::check::{report_json, run_check};
+use magehat::clock::Clock;
 use magehat::init::init_site;
 use magehat::inspect::inspect_site;
 use std::path::{Path, PathBuf};
@@ -793,10 +794,10 @@ feed_items = 3
     std::fs::write(&post, body.replacen("date: 2026-03-05", "date: 2026-03-05T14:30:00-03:00
 author: Ana Souza
 image: /covers/dlc.jpg", 1)).unwrap();
-    let r = build_site(&site).unwrap();
+    let r = build_site_with(&site, &Clock::at("2026-03-05T23:00:00Z").unwrap()).unwrap();
     assert!(r.ok(), "{:?}", r.errors);
 
-    // the newest is March 5; March 3 is within two days of it, March 2 is not
+    // built on March 5: March 3 is within two days, March 2 is not
     let sitemap = text(&r, "news-sitemap.xml");
     assert!(sitemap.contains("<loc>https://news.example/posts/elden-ring-dlc/</loc>") && sitemap.contains("elden-ring-speedrun"), "{sitemap}");
     assert!(!sitemap.contains("hollow-knight") && !sitemap.contains("untagged"), "{sitemap}");
@@ -816,6 +817,88 @@ image: /covers/dlc.jpg", 1)).unwrap();
     let plain = news("news-plain");
     let r = build_site(&plain).unwrap();
     assert!(!r.outputs.contains_key("news-sitemap.xml") && !text(&r, "robots.txt").contains("news-sitemap"));
+
+    // a quiet week still has the file, empty, so the address robots.txt names stays
+    let r = build_site_with(&site, &Clock::at("2026-04-01").unwrap()).unwrap();
+    let sitemap = text(&r, "news-sitemap.xml");
+    assert!(!sitemap.contains("<url>") && sitemap.contains("</urlset>"), "{sitemap}");
+    assert!(text(&r, "robots.txt").contains("Sitemap: https://news.example/news-sitemap.xml"));
+}
+
+#[test]
+fn items_dated_in_the_future_wait_for_their_date() {
+    let site = news("scheduled");
+    std::fs::write(
+        site.join("src/content/posts/next-week.md"),
+        "---\ntitle: Next week's story\ndescription: Written early.\ndate: 2026-03-10\ntags: [Elden Ring]\n---\nNot yet.\n",
+    )
+    .unwrap();
+    let toml = std::fs::read_to_string(site.join("site.toml")).unwrap();
+    std::fs::write(site.join("site.toml"), format!("{toml}\n[collections.posts]\nfeed = true\n")).unwrap();
+
+    // Before its date: no page, not in the list, the feed or the sitemap, and the build says so.
+    let r = build_site_with(&site, &Clock::at("2026-03-09T23:59:59Z").unwrap()).unwrap();
+    assert!(r.ok(), "{:?}", r.errors);
+    assert!(!r.outputs.contains_key("posts/next-week/index.html"));
+    for out in ["posts/index.html", "tags/elden-ring/index.html", "posts/feed.xml", "sitemap.xml"] {
+        assert!(!text(&r, out).contains("next-week"), "{out} lists a scheduled item");
+    }
+    assert_eq!(r.scheduled.len(), 1);
+    assert_eq!(r.scheduled[0].file, "src/content/posts/next-week.md");
+    assert!(r.notes.iter().any(|n| n.contains("1 scheduled item is left out until their date") && n.contains("2026-03-10T00:00:00Z")), "{:?}", r.notes);
+
+    // A date alone is midnight UTC: from then on it is an ordinary item.
+    let r = build_site_with(&site, &Clock::at("2026-03-10T00:00:00Z").unwrap()).unwrap();
+    assert!(r.outputs.contains_key("posts/next-week/index.html"));
+    assert!(text(&r, "posts/index.html").contains("next-week") && text(&r, "sitemap.xml").contains("next-week"));
+    assert!(r.scheduled.is_empty() && r.notes.iter().all(|n| !n.contains("scheduled")));
+
+    // dev shows it early, marked, and says what build will do.
+    let r = build_site_with(&site, &Clock::at("2026-03-05").unwrap().showing_scheduled()).unwrap();
+    assert!(r.outputs.contains_key("posts/next-week/index.html"));
+    let item = r.collections["posts"]["en"].iter().find(|i| i.id == "next-week").unwrap();
+    assert!(matches!(item.meta.get("scheduled"), Some(magehat::values::Value::Bool(true))));
+    assert!(r.notes.iter().any(|n| n.contains("shown with scheduled: true")), "{:?}", r.notes);
+
+    // A time with an offset is exact: 09:00 in São Paulo is noon UTC.
+    std::fs::write(
+        site.join("src/content/posts/next-week.md"),
+        "---\ntitle: Next week's story\ndescription: Written early.\ndate: 2026-03-10T09:00:00-03:00\n---\nNot yet.\n",
+    )
+    .unwrap();
+    let r = build_site_with(&site, &Clock::at("2026-03-10T11:59:00Z").unwrap()).unwrap();
+    assert!(!r.outputs.contains_key("posts/next-week/index.html"));
+    let r = build_site_with(&site, &Clock::at("2026-03-10T12:00:00Z").unwrap()).unwrap();
+    assert!(r.outputs.contains_key("posts/next-week/index.html"));
+}
+
+#[test]
+fn a_repository_root_carries_the_deploy_workflow() {
+    // init writes it, so a new site at the root of its repository checks clean.
+    let site = scaffold("deploy-workflow");
+    std::fs::create_dir_all(site.join(".git")).unwrap();
+    let workflow = site.join(".github/workflows/deploy.yml");
+    assert!(std::fs::read_to_string(&workflow).unwrap().contains("robo-kick/mage-hat/.github/workflows/deploy-site.yml"));
+    let r = run_check(&site).unwrap();
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+
+    // Without it, check says what is missing and how to get it.
+    std::fs::remove_file(&workflow).unwrap();
+    let r = run_check(&site).unwrap();
+    let w = r.warnings.iter().find(|w| w.message.contains("deploy.yml")).expect("a warning about the missing workflow");
+    assert!(w.fix.as_deref().unwrap_or("").contains("magehat new deploy"), "{w}");
+
+    // new deploy writes the same file, once.
+    let msg = magehat::new::new(&site, "deploy", &[], None).unwrap();
+    assert!(msg.contains("Created .github/workflows/deploy.yml") && msg.contains("CLOUDFLARE_API_TOKEN"), "{msg}");
+    assert!(workflow.is_file());
+    assert!(magehat::new::new(&site, "deploy", &[], None).is_err());
+    assert!(run_check(&site).unwrap().warnings.is_empty());
+
+    // A site inside a larger repository is not nagged: no .git at its root.
+    let inner = scaffold("deploy-inner");
+    std::fs::remove_file(inner.join(".github/workflows/deploy.yml")).unwrap();
+    assert!(run_check(&inner).unwrap().warnings.is_empty());
 }
 
 /// The error a site fails to load with, before any page is built.

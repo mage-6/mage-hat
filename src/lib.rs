@@ -8,6 +8,7 @@ pub mod assets;
 pub mod build;
 pub mod check;
 pub mod cli;
+pub mod clock;
 pub mod components;
 pub mod config;
 pub mod content;

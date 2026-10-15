@@ -1,7 +1,8 @@
 //! `magehat dev`: build, serve dist/, rebuild when src changes, reload the
 //! browser. A polling watcher and a small HTTP server; nothing to configure.
 
-use crate::build::{build_site, write_outputs};
+use crate::build::{build_site_with, write_outputs};
+use crate::clock::Clock;
 use crate::check::format_report;
 use crate::components::walk_files;
 use std::collections::BTreeMap;
@@ -28,6 +29,7 @@ const RELOAD_SCRIPT: &str = r#"<script>
 
 struct State {
     root: PathBuf,
+    clock: Clock,
     version: AtomicU64,
     build_lock: Mutex<()>,
 }
@@ -36,7 +38,7 @@ impl State {
     fn rebuild(&self) {
         let _guard = self.build_lock.lock().unwrap();
         let started = Instant::now();
-        let report = match build_site(&self.root) {
+        let report = match build_site_with(&self.root, &self.clock) {
             Ok(result) => match write_outputs(&result, &result.cfg.dist()) {
                 Ok(()) => format_report(&result),
                 Err(e) => format!("error: {e}"),
@@ -155,8 +157,10 @@ fn handle(request: tiny_http::Request, dist: &Path, state: &State) {
     }
 }
 
-pub fn serve(root: &Path, port: u16) -> crate::errors::Result<()> {
-    let state = Arc::new(State { root: root.to_path_buf(), version: AtomicU64::new(0), build_lock: Mutex::new(()) });
+/// Serves the site on the clock with scheduled items shown: a writer previews
+/// next week's story here, and `build` is what leaves it out until then.
+pub fn serve(root: &Path, port: u16, clock: Clock) -> crate::errors::Result<()> {
+    let state = Arc::new(State { root: root.to_path_buf(), clock: clock.showing_scheduled(), version: AtomicU64::new(0), build_lock: Mutex::new(()) });
     state.rebuild();
     let dist = root.join("dist");
     std::fs::create_dir_all(&dist)?;

@@ -5,10 +5,14 @@
 //!     src/content/blog/hello.html         an HTML item
 //!
 //! Markdown items carry metadata in a leading --- block; HTML items start with
-//! <title> and <meta name=... content=...> elements. `draft: true` hides an item.
-//! Items are ordered by `date` descending, then by id. Their h2 and h3
-//! headings get ids and are listed as `toc` (see toc.rs).
+//! <title> and <meta name=... content=...> elements. `draft: true` hides an item
+//! for good; a `date` still to come on the build's clock (clock.rs) hides it
+//! until then, which is how an item is scheduled: nothing else to set, and the
+//! next build on or after that date publishes it. Items are ordered by `date`
+//! descending, then by id. Their h2 and h3 headings get ids and are listed as
+//! `toc` (see toc.rs).
 
+use crate::clock::{parse_iso, Clock};
 use crate::components::walk_files;
 use crate::config::Config;
 use crate::errors::{MageError, Result};
@@ -44,11 +48,28 @@ impl Item {
 /// collection -> language -> ordered items
 pub type Collections = IndexMap<String, IndexMap<String, Vec<Item>>>;
 
-pub fn load_collections(cfg: &Config) -> Result<Collections> {
+/// An item whose date is still to come: left out of the build, or built with
+/// `scheduled: true` when the clock shows scheduled items (dev).
+#[derive(Debug, Clone)]
+pub struct Scheduled {
+    pub collection: String,
+    pub id: String,
+    pub lang: String,
+    pub file: String,
+    /// The date as written.
+    pub date: String,
+    /// The same moment in seconds since the epoch.
+    pub at: i64,
+}
+
+/// Loads every collection as of the clock. The second half lists the items
+/// the clock put off, soonest first.
+pub fn load_collections(cfg: &Config, clock: &Clock) -> Result<(Collections, Vec<Scheduled>)> {
     let base = cfg.src().join("content");
     let mut out = Collections::new();
+    let mut scheduled = Vec::new();
     if !base.is_dir() {
-        return Ok(out);
+        return Ok((out, scheduled));
     }
     let mut dirs: Vec<_> = std::fs::read_dir(&base)?.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
     dirs.sort();
@@ -82,9 +103,23 @@ pub fn load_collections(cfg: &Config) -> Result<Collections> {
                 }
                 None => (stem.clone(), cfg.default_language().to_string()),
             };
-            let item = load_item(&path, &rel, &name, id, lang)?;
+            let mut item = load_item(&path, &rel, &name, id, lang)?;
             if matches!(item.meta.get("draft"), Some(Value::Bool(true))) {
                 continue;
+            }
+            if let Some(at) = item.meta.get("date").map(to_text).as_deref().and_then(parse_iso).filter(|at| *at > clock.now) {
+                scheduled.push(Scheduled {
+                    collection: name.clone(),
+                    id: item.id.clone(),
+                    lang: item.lang.clone(),
+                    file: rel.clone(),
+                    date: to_text(&item.meta["date"]),
+                    at,
+                });
+                if !clock.show_scheduled {
+                    continue;
+                }
+                item.meta.insert("scheduled".into(), Value::Bool(true));
             }
             by_lang.get_mut(&item.lang).unwrap().push(item);
         }
@@ -96,7 +131,8 @@ pub fn load_collections(cfg: &Config) -> Result<Collections> {
         }
         out.insert(name, by_lang);
     }
-    Ok(out)
+    scheduled.sort_by(|a, b| a.at.cmp(&b.at).then_with(|| a.file.cmp(&b.file)));
+    Ok((out, scheduled))
 }
 
 fn date_key(item: &Item) -> String {

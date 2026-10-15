@@ -484,25 +484,11 @@ impl R2 {
     }
 }
 
-/// Days since 1970-01-01 of an ISO 8601 timestamp's date part. The hour does
-/// not matter at a 14-day grace.
+/// Days since 1970-01-01 of an ISO 8601 timestamp's date part, as written:
+/// the offset is ignored, since a weekday in RSS and a 14-day grace both go
+/// by the civil date. The parser is the clock's (clock.rs).
 pub fn days_since_epoch(iso: &str) -> Option<u64> {
-    let mut parts = iso.get(..10)?.split('-');
-    let y: i64 = parts.next()?.parse().ok()?;
-    let m: i64 = parts.next()?.parse().ok()?;
-    let d: i64 = parts.next()?.parse().ok()?;
-    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
-        return None;
-    }
-    // Howard Hinnant's days_from_civil.
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = y.div_euclid(400);
-    let yoe = y - era * 400;
-    let mp = (m + 9) % 12;
-    let doy = (153 * mp + 2) / 5 + d - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    let days = era * 146097 + doe - 719468;
-    u64::try_from(days).ok()
+    u64::try_from(crate::clock::parse_iso(iso.get(..10)?)?.div_euclid(86400)).ok()
 }
 
 fn days_since_epoch_now() -> u64 {

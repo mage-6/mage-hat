@@ -2,7 +2,8 @@
 //! let through. Errors fail the check; warnings are printed but do not.
 //! Every finding says how to fix it.
 
-use crate::build::{build_site, BuildResult};
+use crate::build::{build_site_with, BuildResult};
+use crate::clock::Clock;
 use crate::errors::Result;
 use crate::htmltree::parse;
 use crate::lint::{lint_output, lint_source};
@@ -21,8 +22,14 @@ static DESCRIPTION2: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?is)<meta\s[^>]*content\s*=\s*["']([^"']*)["'][^>]*name\s*=\s*["']description["']"#).unwrap());
 static HTML_LANG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<html\s[^>]*\blang\s*=").unwrap());
 
+/// Check as of now, the wall clock.
 pub fn run_check(root: &Path) -> Result<BuildResult> {
-    let mut r = build_site(root)?;
+    run_check_with(root, &Clock::wall())
+}
+
+pub fn run_check_with(root: &Path, clock: &Clock) -> Result<BuildResult> {
+    let mut r = build_site_with(root, clock)?;
+    check_deploy_workflow(&mut r);
     check_markup(&mut r);
     check_translations(&mut r);
     check_links(&mut r);
@@ -33,6 +40,21 @@ pub fn run_check(root: &Path) -> Result<BuildResult> {
     check_external_fonts(&mut r);
     crate::analytics::check(&mut r);
     Ok(r)
+}
+
+/// A site at the root of its own repository is expected to carry the deploy
+/// workflow (Deploy in the manual): without one nothing ships a merge and no
+/// scheduled item ever goes live. A site inside a larger repository is left
+/// alone; that repository's own workflows call the shared one.
+fn check_deploy_workflow(r: &mut BuildResult) {
+    let root = &r.cfg.root;
+    if root.join(".git").exists() && !root.join(crate::new::DEPLOY_WORKFLOW).is_file() {
+        r.warn(
+            "no .github/workflows/deploy.yml: nothing deploys a merge, and items dated in the future never go live",
+            Some(crate::new::DEPLOY_WORKFLOW),
+            Some("run `magehat new deploy` for the standard workflow and add the CLOUDFLARE_API_TOKEN secret (Deploy in `magehat -h`)"),
+        );
+    }
 }
 
 static ROBOTS: LazyLock<Regex> =

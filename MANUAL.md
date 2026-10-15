@@ -96,10 +96,12 @@ whole document; pages land in the `<slot>`):
     src/assets/          copied to the site root as-is: assets/site.css -> /site.css
     src/assets/fonts/    font files and their stylesheet, saved from a Google Fonts link
     src/media/           one record per file kept in the media bucket (see Media)
+    .github/workflows/deploy.yml
+                         the deploy: on push, by hand, and daily (see Deploy)
 
-`magehat new page <name>`, `new component <name>` and `new item <collection> <id>`
-create correctly shaped files; prefer them over writing files from scratch.
-`magehat add faq` copies a ready-made component in (see below).
+`magehat new page <name>`, `new component <name>`, `new item <collection> <id>`
+and `new deploy` create correctly shaped files; prefer them over writing files
+from scratch. `magehat add faq` copies a ready-made component in (see below).
 
 A folder outside `src/` joins in through site.toml, paths relative to it:
 `[assets] brand = "../brand/svg"` serves that folder at `/brand/`, and
@@ -213,6 +215,18 @@ start with `<title>` and `<meta>` instead. Every item exposes `id`, `url`,
 `title`, `body` (rendered HTML), `toc`, `translations`, and its metadata.
 Components can be used inside content: `<x-figure src="..."></x-figure>`.
 
+An item whose `date` is still to come is scheduled: `build` leaves it out,
+page, lists, feed and sitemaps alike, until a build on or after that date.
+Nothing else to set, and that is how content is dripped: write the items,
+date them over the coming weeks, merge; the daily deploy (see Deploy)
+publishes each on its day. Dates are ISO 8601 and a date alone means
+midnight UTC, so a time with its offset (`2026-10-20T09:00:00-03:00`) says
+when exactly. `dev` shows scheduled items anyway, each with
+`scheduled: true`, so a story can be read before its date; `check` and
+`build` say how many wait and which is next. `--now 2026-10-21` on `build`,
+`check` or `dev` runs the clock at another moment, for a test or a build
+that must come out the same twice. `draft: true` hides an item for good.
+
 Every `h2` and `h3` in an item's body gets an `id`, slugged from its text
 like an archive term: accents folded, lowercase, anything else one hyphen,
 numbering kept (`## 1. Só para um adulto` is `#1-so-para-um-adulto`). A
@@ -243,9 +257,9 @@ RSS and an enclosure, so feed readers, Flipboard and social auto-posters
 show the picture. Dates are ISO 8601: `2026-10-09` or `2026-10-09T14:30:00Z`.
 
 A news site also sets `news = true` there: the build writes
-`/news-sitemap.xml` for Google News with the items dated within two days of
-the newest one (the build has no clock, so publish and deploy together),
-and robots.txt names it.
+`/news-sitemap.xml` for Google News with the items dated within the two
+days before the build, and robots.txt names it. The file stays, empty, when
+nothing is that fresh, so the address never goes away.
 
 ## Lists and archives
 
@@ -432,6 +446,29 @@ production deploy, `magehat indexnow` submits every URL in the live
 sitemap. Run it where a failure cannot fail the deploy: the site is already
 up, and the engines still find changes through the sitemap, only slower.
 
+## Deploy
+
+    magehat new deploy              .github/workflows/deploy.yml
+
+`magehat init` writes that workflow too. It deploys `dist/` to a Cloudflare
+Worker with static assets (the site's `wrangler.toml` names it) on every push
+to main, by hand from the Actions tab, and once a day, so an item dated in
+the future (see Collections) goes live on its date with nobody deploying.
+The steps, `check`, `build`, `wrangler deploy`, `media prune`, `indexnow`,
+live in the MageHat repository and every site runs the current ones, like
+the binary itself. The daily run deploys only when its build differs from
+the live sitemap, so an unchanged site costs one runner minute a day and no
+deploy. One repository secret, `CLOUDFLARE_API_TOKEN`: Workers Scripts edit
+on the site's account, plus R2 edit when the site has `[media]`.
+
+GitHub starts a schedule minutes to hours late and may skip one under load;
+whatever was due is published by the next run, so a date promises the day,
+never the hour. Something that must go live at an exact time is merged at
+that time, which deploys within a minute. A site inside a larger repository
+calls the same workflow from that repository's `.github/workflows/` with
+`with: site: <folder>`. `check` warns when a site at the root of its own
+repository has no deploy workflow.
+
 ## Analytics
 
     [analytics]                     in site.toml
@@ -473,12 +510,16 @@ the build. Canonical, hreflang, sitemap.xml and robots.txt are generated.
                               variables, foreign syntax, unclosed tags, missing
                               translations, broken links and anchors, missing
                               title, description or alt text, duplicate ids,
-                              a relative social image, fonts still on Google
-    magehat build [--json]    write dist/
+                              a relative social image, fonts still on Google,
+                              no deploy workflow
+    magehat build [--json]    write dist/, without items dated in the future
     magehat new ...           page <name> | component <name> | item <coll> <id>
                               (--lang xx for a translation of a page or item)
+                              | deploy (the workflow, see Deploy)
     magehat add [name]        list the ready-made components, or copy one in
-    magehat dev [--port N]    local server with live reload
+    magehat dev [--port N]    local server with live reload; scheduled items shown
+    --now <iso>               on check, build or dev: run the clock at that
+                              moment instead of now (2026-10-20T14:30:00Z)
     magehat inspect [--json]  pages, components with props and a usage example,
                               collections, languages, i18n keys
     magehat init [dir]        sample site with a page, layout, post and image

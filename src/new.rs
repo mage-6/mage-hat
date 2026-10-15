@@ -5,6 +5,7 @@
 //!     magehat new page about --lang pt-BR    src/pages/about.pt-BR.html
 //!     magehat new component card             src/components/card.html
 //!     magehat new item blog hello-world      src/content/blog/hello-world.md
+//!     magehat new deploy                     .github/workflows/deploy.yml (Deploy in the manual)
 
 use crate::components::load_components;
 use crate::config::{load_config, Config};
@@ -54,9 +55,15 @@ pub fn new(root: &Path, kind: &str, args: &[String], lang: Option<&str>) -> Resu
             );
             write_new(root, &format!("src/content/{coll}/{id}{suffix}.md"), &body)
         }
-        other => Err(MageError::new(format!("cannot create {other:?}")).fix("magehat new page <name> | component <name> | item <collection> <id>")),
+        "deploy" => write_new(root, DEPLOY_WORKFLOW, crate::init::DEPLOY_WORKFLOW_TEMPLATE).map(|msg| {
+            format!("{msg}\nAdd the repository secret CLOUDFLARE_API_TOKEN (Workers Scripts edit, plus R2 edit with a media bucket), then push: Deploy in `magehat -h`")
+        }),
+        other => Err(MageError::new(format!("cannot create {other:?}")).fix("magehat new page <name> | component <name> | item <collection> <id> | deploy")),
     }
 }
+
+/// Where a site's deploy workflow lives, relative to the site root.
+pub const DEPLOY_WORKFLOW: &str = ".github/workflows/deploy.yml";
 
 fn arg<'a>(args: &'a [String], i: usize, usage: &str, hint: &str) -> Result<&'a str> {
     args.get(i).map(String::as_str).ok_or_else(|| MageError::new(format!("usage: {usage}")).fix(hint))
