@@ -468,7 +468,9 @@ Google does not take part; it reads the sitemap. With the setting on, the
 build writes the key file the protocol checks, `/<key>.txt`, with a key
 derived from `url`: nothing to generate, store or keep secret. After each
 production deploy, `magehat indexnow` submits every URL in the live
-sitemap. Run it where a failure cannot fail the deploy: the site is already
+sitemap. Run where the site was just built, it first waits, up to three
+minutes, until the live sitemap matches `dist/sitemap.xml`, so a ping sent
+the moment a deploy finishes never describes the site before it. Run it where a failure cannot fail the deploy: the site is already
 up, and the engines still find changes through the sitemap, only slower.
 
 ## Deploy

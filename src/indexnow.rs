@@ -12,13 +12,16 @@
 //! `magehat build` writes the key file when site.toml has `indexnow = true`;
 //! `magehat indexnow` submits every URL in the live sitemap after a deploy.
 //! Resubmitting unchanged URLs is harmless, and one list is simpler than a
-//! diff that could silently miss a page.
+//! diff that could silently miss a page. Right after a deploy the edge can
+//! still serve the previous sitemap, so when dist/ holds the build just
+//! deployed, `indexnow` waits until the live sitemap matches it.
 
 use crate::config::Config;
 use crate::errors::{MageError, Result};
 use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::sync::LazyLock;
+use std::time::Duration;
 
 const ENDPOINT: &str = "https://api.indexnow.org/indexnow";
 
@@ -56,6 +59,31 @@ pub fn payload(site_url: &str, urls: &[String]) -> serde_json::Value {
     })
 }
 
+/// How often and how long `indexnow` asks for the live sitemap while it
+/// waits for the one just deployed: every 5 s for 3 minutes.
+const POLL: Duration = Duration::from_secs(5);
+const ATTEMPTS: u32 = 36;
+
+/// The live sitemap, once it matches `built` (dist/sitemap.xml) when there
+/// is one. Without the wait, a ping sent seconds after a deploy described the
+/// site before it: on 2026-10-13 four sites of twelve submitted their old
+/// sitemap and left out every page that deploy added.
+pub fn live_sitemap(mut fetch: impl FnMut() -> Result<String>, built: Option<&str>, attempts: u32, pause: impl Fn()) -> Result<String> {
+    let mut xml = fetch()?;
+    for _ in 1..attempts {
+        if built.map_or(true, |b| b.trim() == xml.trim()) {
+            return Ok(xml);
+        }
+        pause();
+        xml = fetch()?;
+    }
+    match built {
+        Some(b) if b.trim() != xml.trim() => Err(MageError::new("the live sitemap still differs from dist/sitemap.xml, so the deploy has not reached the site")
+            .fix("deploy dist/ and run this again; to submit whatever is live instead, delete dist/ first")),
+        _ => Ok(xml),
+    }
+}
+
 /// Read the live sitemap and submit it. Returns how many URLs went.
 ///
 /// The live sitemap, not dist/: the ping has to describe what is deployed,
@@ -69,10 +97,17 @@ pub fn submit(cfg: &Config) -> Result<usize> {
         return Err(MageError::in_file("IndexNow needs the site's address", "site.toml").fix("set url = \"https://your-domain\" in site.toml"));
     }
     let sitemap_url = format!("{}/sitemap.xml", cfg.url);
-    let xml = ureq::get(&sitemap_url)
-        .call()
-        .and_then(|mut r| r.body_mut().read_to_string())
-        .map_err(|e| MageError::new(format!("could not read {sitemap_url}: {e}")).fix("deploy the site first; IndexNow submits what is live"))?;
+    let built = std::fs::read_to_string(cfg.dist().join("sitemap.xml")).ok();
+    let mut n = 0u64;
+    let fetch = || {
+        // A new query each time, so an edge cache cannot answer with the old file.
+        n += 1;
+        ureq::get(&format!("{sitemap_url}?magehat={}-{n}", std::process::id()))
+            .call()
+            .and_then(|mut r| r.body_mut().read_to_string())
+            .map_err(|e| MageError::new(format!("could not read {sitemap_url}: {e}")).fix("deploy the site first; IndexNow submits what is live"))
+    };
+    let xml = live_sitemap(fetch, built.as_deref(), ATTEMPTS, || std::thread::sleep(POLL))?;
     let urls = sitemap_urls(&xml);
     if urls.is_empty() {
         return Err(MageError::new(format!("{sitemap_url} lists no URLs")));
@@ -94,6 +129,26 @@ pub fn submit(cfg: &Config) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fetches(seq: &[&str]) -> impl Fn() -> Result<String> {
+        let seq: Vec<String> = seq.iter().map(|s| s.to_string()).collect();
+        let i = std::cell::Cell::new(0);
+        move || {
+            let n = i.get().min(seq.len() - 1);
+            i.set(i.get() + 1);
+            Ok(seq[n].clone())
+        }
+    }
+
+    #[test]
+    fn the_wait_ends_when_the_live_sitemap_matches_the_build() {
+        assert_eq!(live_sitemap(fetches(&["old", "old", "new
+"]), Some("new"), 10, || {}).unwrap(), "new
+");
+        assert_eq!(live_sitemap(fetches(&["old"]), None, 10, || {}).unwrap(), "old", "no build: what is live goes at once");
+        let e = live_sitemap(fetches(&["old"]), Some("new"), 3, || {}).unwrap_err();
+        assert!(e.to_string().contains("still differs from dist/sitemap.xml"), "{e}");
+    }
 
     #[test]
     fn the_key_is_stable_valid_and_ignores_a_trailing_slash() {
