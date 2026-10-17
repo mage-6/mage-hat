@@ -8,6 +8,7 @@
   </url>
   <url>
     <loc>https://example.com/blog/</loc>
+    <lastmod>2026-02-01</lastmod>
   </url>
   <url>
     <loc>https://example.com/blog/hello-world/</loc>
@@ -19,8 +20,10 @@
   </url>
   <url>
     <loc>https://example.com/tags/meta/</loc>
+    <lastmod>2026-02-01</lastmod>
   </url>
   <url>
     <loc>https://example.com/tags/news/</loc>
+    <lastmod>2026-01-15</lastmod>
   </url>
 </urlset>

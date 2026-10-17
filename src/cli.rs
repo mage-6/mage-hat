@@ -63,6 +63,8 @@ struct Args {
     raw: bool,
     /// `--now <iso>`: the build's clock, instead of the wall clock.
     now: Option<String>,
+    /// Everything after `--`, untouched: the deploy `indexnow` wraps.
+    rest: Vec<String>,
 }
 
 impl Args {
@@ -75,10 +77,11 @@ impl Args {
 }
 
 fn parse_args(argv: &[String]) -> Result<Args> {
-    let mut args = Args { command: String::new(), positional: Vec::new(), json: false, port: 8080, lang: None, dry_run: false, raw: false, now: None };
+    let mut args = Args { command: String::new(), positional: Vec::new(), json: false, port: 8080, lang: None, dry_run: false, raw: false, now: None, rest: Vec::new() };
     let mut it = argv.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
+            "--" => args.rest = it.by_ref().cloned().collect(),
             "--json" => args.json = true,
             "--dry-run" => args.dry_run = true,
             "--raw" => args.raw = true,
@@ -220,9 +223,20 @@ fn run(argv: &[String]) -> Result<i32> {
         "indexnow" => {
             let root = site_root()?;
             let cfg = crate::config::load_config(&root)?;
-            let count = crate::indexnow::submit(&cfg)?;
-            println!("Submitted {count} URLs from {}/sitemap.xml to IndexNow", cfg.url);
-            Ok(0)
+            if args.rest.is_empty() {
+                let count = crate::indexnow::submit(&cfg)?;
+                println!("Submitted {count} URLs from {}/sitemap.xml to IndexNow", cfg.url);
+                return Ok(0);
+            }
+            let done = crate::indexnow::deploy_and_submit(&cfg, &args.rest)?;
+            match done.submitted {
+                _ if done.code != 0 => eprintln!("The deploy failed (exit {}), so IndexNow was not told anything", done.code),
+                Ok(Some(n)) => println!("Submitted the {n} URLs this deploy changed to IndexNow"),
+                Ok(None) => println!("This deploy changed no URL in {}/sitemap.xml, so IndexNow was not told anything", cfg.url),
+                // The deploy stands, so its exit code is what this returns.
+                Err(e) => eprintln!("warning: the deploy went out, but IndexNow was not told: {e}"),
+            }
+            Ok(done.code)
         }
         "media" => {
             let root = site_root()?;

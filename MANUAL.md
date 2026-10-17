@@ -449,6 +449,20 @@ a comma a loop leaves before `]` or `}` is forgiven. The result must be
 valid JSON or the build fails and says where; it is written compact. Every
 other `<script>` and `<style>` is left exactly as written.
 
+## Sitemap
+
+`sitemap.xml` lists every page that is not `noindex`, each with a
+`<lastmod>`: the day its own content last changed, so Google and Bing
+recrawl what changed and nothing else. The date comes from git, never from
+the build: the last commit that touched the page's file, its item, the items
+a list page shows or an archive term's record, and the build's day for a
+file with uncommitted changes. Layouts and components do not count; a new
+footer is not new content. An item's own `date` counts when it is later. In
+a folder that is not a git repository, or a shallow clone, the only dates
+are the items' own: no date beats a wrong one, and the deploy workflow
+checks out the full history for this. Nothing is ever submitted to Google
+by hand: it reads the sitemap.
+
 ## robots.txt and llms.txt
 
 Both are generated unless `src/assets` holds the site's own. robots.txt
@@ -467,11 +481,21 @@ changed, so they crawl within hours instead of whenever they next pass by.
 Google does not take part; it reads the sitemap. With the setting on, the
 build writes the key file the protocol checks, `/<key>.txt`, with a key
 derived from `url`: nothing to generate, store or keep secret. After each
-production deploy, `magehat indexnow` submits every URL in the live
-sitemap. Run where the site was just built, it first waits, up to three
-minutes, until the live sitemap matches `dist/sitemap.xml`, so a ping sent
-the moment a deploy finishes never describes the site before it. Run it where a failure cannot fail the deploy: the site is already
-up, and the engines still find changes through the sitemap, only slower.
+deploy, the engines are told only what it changed: wrap the deploy,
+
+    magehat indexnow -- pnpm dlx wrangler@4 deploy
+
+and MageHat reads the live sitemap, runs the command, then submits the URLs
+that are new, gone or carry another `<lastmod>`; a deploy that changed none
+submits nothing. Bing asks for changed URLs only and discounts a host that
+resends everything. The command's exit code is the result: when the deploy
+fails nothing is sent, and a failed submission is a warning, since the site
+is already up and the engines still find changes through the sitemap. Run
+where the site was just built, it waits, up to three minutes, until the live
+sitemap matches `dist/sitemap.xml`, so the ping never describes the site
+before the deploy. A bare `magehat indexnow` submits every URL, once, for a
+site's first submission. On Windows name a .cmd by its full name
+(`pnpm.cmd`).
 
 ## Deploy
 
@@ -485,7 +509,7 @@ with nobody deploying: it deploys only when its build differs from the live
 sitemap, and it is switched on by any deploy whose build put items off and
 off again by the deploy that publishes the last of them, so a site with
 nothing scheduled runs nothing. The steps, `check`, `build`, `wrangler
-deploy`, `media prune`, `indexnow` and that switch, live in the MageHat
+deploy` wrapped by `indexnow`, `media prune` and that switch, live in the MageHat
 repository and every site runs the current ones, like the binary itself.
 One repository secret, `CLOUDFLARE_API_TOKEN`: Workers Scripts edit on the
 site's account, plus R2 edit when the site has `[media]`. The workflows
@@ -560,7 +584,9 @@ the build. Canonical, hreflang, sitemap.xml and robots.txt are generated.
                               collections, languages, i18n keys
     magehat init [dir]        sample site with a page, layout, post and image
     magehat clean             remove dist/ and the image cache
-    magehat indexnow          after a deploy, submit the live sitemap to IndexNow
+    magehat indexnow -- <deploy command>
+                              deploy, then submit the URLs it changed to IndexNow;
+                              bare, submit every URL in the live sitemap
     magehat media add <file> [name] [--raw]
                               encode and upload a cover or a video to the media
                               bucket and write its record under src/media/;

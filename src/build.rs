@@ -265,12 +265,15 @@ struct Builder<'r> {
     scheduled_links: crate::scheduled_links::ScheduledLinks,
     /// Links on pages that point at a scheduled item, written as text.
     unlinked: usize,
+    /// When each source file last changed, for the sitemap's lastmod.
+    revisions: Option<crate::lastmod::Revisions>,
 }
 
 impl<'r> Builder<'r> {
     fn run(result: &'r mut BuildResult) {
         let icons = crate::icons::Icons::new(&result.cfg.root, &result.cfg.icons);
         let fonts = crate::fonts::Fonts::new(&result.cfg.root);
+        let revisions = crate::lastmod::Revisions::load(&result.cfg.root, &result.clock);
         let mut b = Builder {
             r: result,
             trees: HashMap::new(),
@@ -284,6 +287,7 @@ impl<'r> Builder<'r> {
             fonts,
             scheduled_links: Default::default(),
             unlinked: 0,
+            revisions,
         };
         b.find_item_pages();
         b.plan_scheduled_links();
@@ -658,6 +662,17 @@ impl<'r> Builder<'r> {
         }
     }
 
+    /// The day a source file last changed (lastmod.rs), None without history.
+    fn changed(&self, file: &str) -> Option<String> {
+        self.revisions.as_ref().and_then(|r| r.date(file))
+    }
+
+    /// An item's lastmod: its own `date` or its file's last change, the later.
+    fn item_lastmod(&self, lang: &str, coll: &str, i: usize) -> Option<String> {
+        let own = self.items[lang][coll][i].get("date").map(to_text).filter(|s| !s.is_empty());
+        crate::lastmod::latest(own, self.changed(&self.r.collections[coll][lang][i].file))
+    }
+
     fn plan_instances(&mut self) -> Vec<Instance> {
         let mut out = Vec::new();
         let mut identities: Vec<String> = Vec::new();
@@ -686,7 +701,7 @@ impl<'r> Builder<'r> {
                         item_var: None,
                         translations,
                         item_id: None,
-                        lastmod: None,
+                        lastmod: self.changed(&src.file),
                         pager: None,
                     });
                 }
@@ -696,7 +711,7 @@ impl<'r> Builder<'r> {
             for lang in &cfg.languages {
                 let Some(src) = resolve(&self.r.sources, identity, lang, cfg) else { continue };
                 let source = self.r.sources.iter().position(|p| std::ptr::eq(p, src)).unwrap();
-                for d in &self.items[lang][coll] {
+                for (i, d) in self.items[lang][coll].iter().enumerate() {
                     let Some(url) = d.get("url").and_then(|u| u.as_str()) else { continue };
                     out.push(Instance {
                         identity: identity.clone(),
@@ -708,7 +723,7 @@ impl<'r> Builder<'r> {
                         item_var: Some(var.clone()),
                         translations: translations_from_value(&d["translations"]),
                         item_id: d.get("id").map(to_text),
-                        lastmod: d.get("date").map(to_text).filter(|s| !s.is_empty()),
+                        lastmod: self.item_lastmod(lang, coll, i),
                         pager: None,
                     });
                 }
@@ -760,6 +775,19 @@ impl<'r> Builder<'r> {
                     let count = indices.len().div_ceil(spec.per_page).max(1);
                     for number in 1..=count {
                         let chunk: Vec<usize> = indices.iter().skip((number - 1) * spec.per_page).take(spec.per_page).cloned().collect();
+                        // A listing changes when its page file, an item it shows
+                        // or its term's record does.
+                        let mut lastmod = self.changed(&src.file);
+                        for &i in &chunk {
+                            lastmod = crate::lastmod::latest(lastmod, self.item_lastmod(lang, &spec.collection, i));
+                        }
+                        if let (Some(field), Some(slug)) = (&spec.by, &slug) {
+                            if self.term_records(&spec.collection, field) {
+                                if let Some(record) = self.r.collections[field][lang].iter().find(|r| &r.id == slug) {
+                                    lastmod = crate::lastmod::latest(lastmod, self.changed(&record.file));
+                                }
+                            }
+                        }
                         out.push(Instance {
                             identity: identity.clone(),
                             lang: lang.clone(),
@@ -770,7 +798,7 @@ impl<'r> Builder<'r> {
                             item_var: src.item_var.clone(),
                             translations: Vec::new(),
                             item_id: slug.clone(),
-                            lastmod: None,
+                            lastmod,
                             pager: Some(PagerPlan {
                                 collection: spec.collection.clone(),
                                 indices: chunk,

@@ -24,6 +24,7 @@ pub mod indexnow;
 pub mod init;
 pub mod inspect;
 pub mod jsonld;
+pub mod lastmod;
 pub mod library;
 pub mod lint;
 pub mod markdown;

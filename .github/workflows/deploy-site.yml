@@ -1,7 +1,7 @@
 # The deploy every MageHat site runs, called from the site's own
 # .github/workflows/deploy.yml (push, manual) and drip.yml (daily), both
 # written by `magehat init` or `magehat new deploy`: check, build, `wrangler
-# deploy`, `media prune`, `indexnow`.
+# deploy` wrapped by `indexnow`, `media prune`.
 #
 # Items dated ahead (Collections in the manual) go live through drip.yml. A
 # scheduled run deploys only when its build differs from the live sitemap,
@@ -27,7 +27,11 @@ jobs:
       run:
         working-directory: ${{ inputs.site }}
     steps:
+      # The whole history: each page's <lastmod> is the last commit that
+      # changed its content (lastmod.rs), and a shallow clone has one date.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       # Always the current release, so a MageHat fix reaches every site at its
       # next deploy. One static binary: no Node toolchain, nothing that expires.
@@ -63,9 +67,12 @@ jobs:
         with:
           version: 10
 
+      # indexnow wraps the deploy so it can tell Bing and the other IndexNow
+      # engines only what this deploy changed. The deploy's exit code is the
+      # step's: a failed ping is a warning, since the site is up by then.
       - name: Deploy
         if: steps.live.outputs.changed != 'false'
-        run: pnpm dlx wrangler@4 deploy
+        run: magehat indexnow -- pnpm dlx wrangler@4 deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
@@ -77,13 +84,6 @@ jobs:
           if grep -q '^\[media\]' site.toml; then magehat media prune; else echo "No media bucket"; fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-
-      # Tells Bing and the other IndexNow engines which pages changed. The
-      # site is live by now, so a failed ping never fails the deploy.
-      - name: IndexNow
-        if: steps.live.outputs.changed != 'false'
-        run: magehat indexnow
-        continue-on-error: true
 
       # The daily run exists only while something is scheduled. The callers
       # grant `actions: write` for this; a site without drip.yml is told when
