@@ -996,9 +996,12 @@ fn items_dated_in_the_future_wait_for_their_date() {
 
 #[test]
 fn a_repository_root_carries_the_deploy_workflow() {
-    // init writes both, so a new site at the root of its repository checks clean.
+    // init writes both, so a new site at the root of its repository checks clean once it
+    // sets [analytics], the one thing init cannot fill in (it does not know the slug).
     let site = scaffold("deploy-workflow");
     std::fs::create_dir_all(site.join(".git")).unwrap();
+    let toml = std::fs::read_to_string(site.join("site.toml")).unwrap();
+    std::fs::write(site.join("site.toml"), format!("{toml}\n[analytics]\nendpoint = \"https://events.example.com/v2/my-site\"\n")).unwrap();
     let workflow = site.join(".github/workflows/deploy.yml");
     for f in ["deploy.yml", "drip.yml"] {
         assert!(std::fs::read_to_string(site.join(".github/workflows").join(f)).unwrap().contains("robo-kick/mage-hat/.github/workflows/deploy-site.yml"), "{f}");
@@ -1113,6 +1116,20 @@ fn media_mistakes_fail_the_build_with_the_fix() {
     assert!(err.to_string().contains("[media] needs bucket"), "{err}");
 }
 
+/// A site at the root of its own repository is in production and is always
+/// measured: without `[analytics]`, check says so. A scratch folder is not warned.
+#[test]
+fn a_repository_site_without_analytics_is_warned() {
+    let site = scaffold("analytics-missing");
+    let warned = |site: &Path| run_check(site).unwrap().warnings.iter().any(|w| w.to_string().contains("no [analytics] in site.toml"));
+    assert!(!warned(&site), "not a repository: no warning");
+    std::fs::create_dir_all(site.join(".git")).unwrap();
+    assert!(warned(&site), "a repository root without [analytics] is warned");
+    let toml = std::fs::read_to_string(site.join("site.toml")).unwrap();
+    std::fs::write(site.join("site.toml"), format!("{toml}\n[analytics]\nendpoint = \"https://events.example.com/v2/my-site\"\n")).unwrap();
+    assert!(!warned(&site), "measured: no warning");
+}
+
 /// `[analytics]` ships the beacon and fires the two website events; without
 /// it the site carries not a byte of analytics.
 #[test]
@@ -1142,7 +1159,7 @@ fn analytics_beacon_is_opt_in() {
     assert!(js.starts_with(beacon.trim_end()), "beacon.js verbatim, first");
     assert!(js.contains(&format!("createBeacon(\"{endpoint}\", \"1.2.0\")")), "{js}");
     assert!(js.contains("analytics(\"page_view\");"), "{js}");
-    assert!(js.contains("closest(\"[data-track]\")") && js.contains("analytics(\"conversion\", [el.getAttribute(\"data-track\")])"), "{js}");
+    assert!(js.contains("closest(\"[data-track]\")") && js.contains("analytics(\"conversion\", [el.getAttribute(\"data-track\"), el.getAttribute(\"data-placement\") ?? \"\"])"), "{js}");
     assert!(!js.contains("import ") && !js.contains("http://"), "self-contained: {js}");
     let tag = format!("<script type=\"module\" src=\"/{name}\"></script>");
     for out in ["index.html", "pricing/index.html", "blog/hello-world/index.html", "404.html"] {

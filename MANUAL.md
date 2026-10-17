@@ -514,8 +514,12 @@ verbatim and never fetched from anywhere else, plus the two events a
 website has. `page_view` goes out on every page load and `conversion` with
 the kind when an element carrying `data-track="<kind>"` is clicked, the
 page path and referrer host with each (never a full URL). The kind is a
-lowercase token (`signup`, `download`, `purchase`, `contact`); `check`
-reports one that is not, and a `data-track` on a site with no `[analytics]`.
+lowercase token (`signup`, `download`, `purchase`, `contact`); a
+`data-placement="<where>"` beside it (`hero`, `footer`) travels as the
+conversion's second param, so two buttons of one kind can be told apart.
+`check` reports a kind that is not a token, a `data-track` on a site with no
+`[analytics]`, and, for a site at the root of its own repository, a missing
+`[analytics]` at all: a site in production is always measured.
 A `version` key in site.toml, when the site has one, travels in the batch
 header. No cookies, no storage, nothing identifying, so no consent banner.
 A page served from localhost sends nothing, so `magehat dev` never counts.

@@ -9,7 +9,8 @@
 //! the skill's clients/web/beacon.js, never fetched from anywhere at run
 //! time) followed by the glue that creates the beacon and fires the two
 //! events a website has: `page_view` on every load and `conversion` with a
-//! kind token when an element carrying `data-track="<kind>"` is clicked.
+//! kind token when an element carrying `data-track="<kind>"` is clicked, and
+//! its `data-placement` token, if any, as the second param.
 //! Without the table nothing is written: not a byte.
 //!
 //! The version in the batch header is `version` from site.toml when the
@@ -27,6 +28,10 @@ pub const BEACON: &str = include_str!("beacon.js");
 
 /// The attribute content authors put on a button or link to count a conversion.
 pub const TRACK_ATTR: &str = "data-track";
+/// Optional beside it: where on the page the element sits (`hero`, `footer`), so
+/// two buttons with the same kind can be told apart. Sent as the conversion's
+/// second param, empty when absent.
+pub const PLACEMENT_ATTR: &str = "data-placement";
 
 /// A text param of the contract: lowercase token, at most 64 characters.
 static TOKEN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z0-9/][a-z0-9_./-]{0,63}$").unwrap());
@@ -53,7 +58,7 @@ pub fn script(cfg: &Config, a: &Analytics) -> String {
          \x20 analytics(\"page_view\");\n\
          \x20 addEventListener(\"click\", (e) => {{\n\
          \x20   const el = e.target instanceof Element ? e.target.closest(\"[{TRACK_ATTR}]\") : null;\n\
-         \x20   if (el) analytics(\"conversion\", [el.getAttribute(\"{TRACK_ATTR}\")]);\n\
+         \x20   if (el) analytics(\"conversion\", [el.getAttribute(\"{TRACK_ATTR}\"), el.getAttribute(\"{PLACEMENT_ATTR}\") ?? \"\"]);\n\
          \x20 }});\n\
          }}\n",
         BEACON.trim_end()
@@ -70,6 +75,16 @@ pub fn file_name(text: &str) -> String {
 /// attribute does nothing until `[analytics]` is set.
 pub fn check(r: &mut BuildResult) {
     let enabled = r.cfg.analytics.is_some();
+    // A site at the root of its own repository is a site in production, which
+    // the analytics skill says is always measured; like the deploy workflow
+    // check, a site inside a larger repository or a scratch folder is left alone.
+    if !enabled && r.cfg.root.join(".git").exists() {
+        r.warn(
+            "no [analytics] in site.toml: the site counts no visits",
+            Some("site.toml"),
+            Some("add [analytics] with endpoint = \"https://events.<publisher domain>/v2/<site slug>\" and register the slug on the collector (analytics skill)"),
+        );
+    }
     let mut warnings = Vec::new();
     for p in &r.pages {
         let html = String::from_utf8_lossy(&r.outputs[&p.out]);
