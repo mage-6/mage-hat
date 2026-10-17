@@ -12,7 +12,14 @@
 //   const analytics = createBeacon("/api/track");
 //   analytics("page_view");
 //   analytics("conversion", ["signup"]);
+//
+// A browser driven by automation (an agent's test, a crawler built on Chrome) says so in
+// navigator.webdriver and sends nothing; the collector drops the ones that hide it but name
+// themselves in their user agent.
+//
+// Beacon 1.1.0. A site or generator holds this file unchanged; a change is made here.
 export function createBeacon(endpoint, version = "") {
+  if (navigator.webdriver) return () => {};
   let variant = "";
   try {
     variant = localStorage.getItem("analytics.variant") ?? "";
